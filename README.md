@@ -96,12 +96,12 @@ uvicorn app.main:app --reload --port 3000
 
 UI me **"PDF / DOCX upload"** tab hai — file drop karo ya click karke chuno.
 
-- Backend `markitdown` se text nikaalta hai — **poora local**, koi API call nahi, koi token cost nahi. Iseeliye Gemini/GPT se PDF padhwane wala jugaad nahi kiya.
+- Backend `markitdown` se text nikaalta hai — **poora local**, koi API call nahi, koi token cost nahi. Isiliye Gemini/GPT se PDF padhwane wala jugaad nahi kiya.
 - Support: `.pdf` `.docx` `.doc` `.pptx` `.txt` `.md` `.html` `.htm` `.rtf` — max **10 MB**
 - Nikla hua text seedha JD box me chala jaata hai, upload ke neeche preview bhi dikhta hai. "Text edit karo" pe click karke paste tab me jaake usme changes kar sakte ho — search wahi final text use karti hai.
 - **Scanned PDF (sirf images) me text nahi milega** — markitdown OCR nahi karta, aisi file par saaf error dikhega.
 
-markitdown blocking library hai, isliye `asyncio.to_thread` me chalati hai taaki bada PDF server ko block na kare.
+markitdown blocking library hai, isliye use `asyncio.to_thread` me chalate hain taaki bada PDF server ko block na kare.
 
 ---
 
@@ -111,7 +111,8 @@ markitdown blocking library hai, isliye `asyncio.to_thread` me chalati hai taaki
 - **Limit slider** — 50 se 200 tak, step 10. Ye *per source* hai, to "both" pe 200 matlab ~400 jobs
 - **Sources** — LinkedIn + Indeed / sirf LinkedIn / sirf Indeed
 - **AI Matching toggle** — off karoge to scraping to hogi par score nahi milega (aur OpenRouter cost bhi nahi lagega)
-- **Live log** — scraping me 30-60 second lagte hain, isliye har step ka update dikhta hai
+- **Live log** — poore run me 1.5-3 minute lagte hain (scraping ~60-75s, phir AI scoring), isliye har step ka update live dikhta hai
+- **Startup par keys check** — `.env` me koi key missing ho to page khulte hi log me red warning aa jaati hai
 - **Table** — match score + reason, source badge, clickable job title, company, location, type, level, salary, posted date
 - Column header pe click karke sort, filter box, aur CSV download
 
@@ -200,7 +201,24 @@ curl -s "https://api.apify.com/v2/users/me/limits?token=$APIFY_API_KEY"
 - **LinkedIn me same company ki repeat postings** aati hain (jaise Accenture ke 13 listings). Ye actual alag-alag job IDs hain, duplicate nahi — dedupe URL par hota hai.
 - **Apify data 7 din me delete ho jaata hai** (free plan retention), isliye jo chahiye wo CSV download kar lena.
 - **Browser tab band karoge to background pipeline cancel ho jaata hai** — stream toot-te hi task cancel hota hai, credits bachte hain.
+- **Purana `node server.js` port 3000 par mat chhodna.** Wo `::` (sab interfaces) par bind hota hai aur uvicorn `127.0.0.1` par — browser me `localhost` pehle IPv6 par jaata hai, to purana Express backend khul jaata hai aur PDF upload `Cannot POST /api/extract` deta hai. Kaun sun raha hai check karne ke liye:
+  ```powershell
+  Get-NetTCPConnection -LocalPort 3000 -State Listen
+  ```
 - `.env` `.gitignore` me hai — commit mat karna.
+
+### Scoring thodi strict hai
+
+Bahut saari postings ke description me tech stack likha hi nahi hota. AI usse "detail missing" maan ke 10-15 point kaat deta hai — test run me top match ko 89 mila kyunki JD ka PostgreSQL/AWS posting me mention hi nahi tha.
+
+Zyada naram scoring chahiye to [app/llm.py](app/llm.py) ke `SCORE_PROMPT` me ek line add kar do:
+
+```
+Missing details are not a mismatch — only deduct for clear contradictions
+(different role, different seniority, different tech stack).
+```
+
+Ulta strict chahiye (sirf perfect matches upar) to scoring guide ke thresholds badha do.
 
 ---
 

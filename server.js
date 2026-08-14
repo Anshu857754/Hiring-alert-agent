@@ -9,8 +9,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const MIN_LIMIT = 50;
-const MAX_LIMIT = 200;
+const MIN_LIMIT = 10;
+const MAX_LIMIT = 30;
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(join(__dirname, 'public')));
