@@ -1,0 +1,20 @@
+{
+  "name": "hiring-agent",
+  "version": "1.0.0",
+  "main": "scrape-jobs.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "scrape": "node scrape-jobs.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "apify-client": "^2.25.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}

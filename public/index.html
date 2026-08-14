@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hiring Agent</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Hiring Agent</h1>
+    <div class="sub">JD paste kariye ya PDF daaliye — <code id="model">deepseek/deepseek-v4-pro</code> search banayega, Apify LinkedIn + Indeed scrape karega, aur results match score ke saath table me aayenge.</div>
+  </header>
+
+  <div class="card">
+    <div class="jd-head">
+      <label for="jd">Job Description</label>
+      <div class="tabs">
+        <button class="tab on" type="button" data-pane="paste">Paste text</button>
+        <button class="tab" type="button" data-pane="upload">PDF / DOCX upload</button>
+      </div>
+    </div>
+
+    <div class="pane on" id="pane-paste">
+      <textarea id="jd" placeholder="Poora job description yahan paste kariye...
+
+Example:
+We are hiring a Senior Backend Engineer in Bengaluru.
+5+ years experience with Node.js, PostgreSQL, AWS and microservices.
+Must have experience building REST APIs at scale."></textarea>
+    </div>
+
+    <div class="pane" id="pane-upload">
+      <div class="drop" id="drop">
+        <div class="big">JD file yahan drop kariye ya click karke chuniye</div>
+        <div class="small">PDF, DOCX, PPTX, TXT, MD, HTML &mdash; max 10 MB</div>
+        <div class="pill">markitdown se local parse &mdash; koi LLM token kharch nahi</div>
+        <input type="file" id="file" accept=".pdf,.docx,.doc,.txt,.md,.html,.htm,.rtf,.pptx" hidden>
+      </div>
+      <div class="file-row" id="fileRow"></div>
+      <div class="preview" id="preview"></div>
+    </div>
+
+    <div class="controls">
+      <div class="ctl grow">
+        <label for="limit">Jobs per source (50&ndash;200)</label>
+        <div class="slider-row">
+          <input type="range" id="limit" min="50" max="200" step="10" value="50">
+          <span class="limit-val" id="limitVal">50</span>
+        </div>
+      </div>
+
+      <div class="ctl">
+        <label for="source">Sources</label>
+        <select id="source">
+          <option value="both">LinkedIn + Indeed</option>
+          <option value="linkedin">Sirf LinkedIn</option>
+          <option value="indeed">Sirf Indeed</option>
+        </select>
+      </div>
+
+      <div class="ctl">
+        <label>AI Matching</label>
+        <div class="check"><input type="checkbox" id="useAi" checked><span>Score &amp; rank karo</span></div>
+      </div>
+
+      <div class="ctl"><button id="go">Search Jobs</button></div>
+    </div>
+
+    <div class="hint" id="hint"></div>
+  </div>
+
+  <div id="log">
+    <div class="log-box" id="logBox"></div>
+  </div>
+
+  <div id="summary"></div>
+
+  <div id="results">
+    <div class="res-head">
+      <h2 id="resTitle"></h2>
+      <div style="display:flex;gap:10px;">
+        <input type="text" id="filter" placeholder="Filter by title/company...">
+        <button class="ghost" id="csv">Download CSV</button>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr id="thead"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
