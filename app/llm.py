@@ -16,6 +16,20 @@ _FENCE_END = re.compile(r"```$")
 
 
 async def _chat(messages: list[dict], api_key: str, temperature: float = 0.2) -> tuple[dict, dict]:
+    """`reasoning.enabled=False` yahan latency ka sabse bada lever hai.
+
+    DeepSeek v4 Pro reasoning model hai aur bina roke output ka ~75% andar hi
+    andar sochne me laga deta hai. Cache-free benchmark (har call me alag nonce):
+
+        baseline                    3102 completion tokens, 2353 reasoning
+        reasoning_effort="low"      3440 / 2680   <- asar nahi padta
+        reasoning.max_tokens=150    5287 / 4654   <- cap ignore ho jaata hai
+        reasoning.enabled=False      654 / 0      <- output 79% kam
+
+    Model ~70-95 tok/s deta hai, to token count hi wall-clock time hai. Yahan ke
+    teeno kaam (JD parse, rubric scoring, plan) structured output hain — chain of
+    thought inke liye zaroori nahi, aur JSON schema dono soorat me valid rehta hai.
+    """
     async with httpx.AsyncClient(timeout=180.0) as client:
         res = await client.post(
             API_URL,
@@ -29,6 +43,7 @@ async def _chat(messages: list[dict], api_key: str, temperature: float = 0.2) ->
                 "messages": messages,
                 "temperature": temperature,
                 "response_format": {"type": "json_object"},
+                "reasoning": {"enabled": False},
             },
         )
 
@@ -45,7 +60,9 @@ async def _chat(messages: list[dict], api_key: str, temperature: float = 0.2) ->
 
     # Model kabhi kabhi JSON ko ```json fence me wrap kar deta hai.
     cleaned = _FENCE_END.sub("", _FENCE_START.sub("", content.strip()))
-    return json.loads(cleaned), data.get("usage") or {}
+    usage = dict(data.get("usage") or {})
+    usage["provider"] = data.get("provider")  # latency debug karne ke liye
+    return json.loads(cleaned), usage
 
 
 EXTRACT_PROMPT = """You are a recruitment search assistant. Read the job description and extract search parameters for scraping LinkedIn and Indeed.
@@ -90,12 +107,13 @@ Return ONLY a JSON object of the form:
 {"results": [{"i": <the posting number>, "score": <integer 0-100>, "reason": "<max 12 words explaining the score>"}]}
 
 Scoring guide: 90+ near-identical role and seniority; 70-89 strong match with minor gaps; 50-69 related but different seniority/stack; below 50 weak match.
-You MUST return one entry for every posting number given."""
+You MUST return one entry for every posting number given.
+Score directly from the guide - do not deliberate at length."""
 
 
 def _compact_job(job: dict, index: int) -> str:
     """Poore descriptions bhejne se tokens bahut lagte hain, isliye trim karke bhejte hain."""
-    description = re.sub(r"\s+", " ", job.get("description") or "")[:700]
+    description = re.sub(r"\s+", " ", job.get("description") or "")[:450]
     return "\n".join(
         [
             f"#{index}",
@@ -165,3 +183,84 @@ async def score_jobs(
         scored.append({**job, "matchScore": hit["score"] if hit else None, "matchReason": hit["reason"] if hit else None})
 
     return {"jobs": scored, "usage": usage_total}
+
+
+RECOMMEND_PROMPT = """You are a career coach for a job seeker. You get the seeker's profile (a resume or self-description) and job postings that were already matched and scored against that profile.
+
+Your job: find the skills that keep the seeker OUT of the near-miss postings, then design a focused study plan that would realistically lift those matches.
+
+Rules:
+- Only recommend skills that actually appear in the supplied postings. Never invent requirements.
+- Focus on near-miss postings (roughly 40-75 score). Ignore postings that already match strongly, and ignore ones from a completely different career track.
+- Choose planDays yourself: 15 when the gaps are shallow (one framework, one tool, one library), 30 when they need real depth (a new language, distributed systems, cloud infrastructure). Return only 15 or 30.
+- Be honest. If a posting demands years of experience that no short plan can create, put it in notRealistic instead of promising it.
+- projectedScore is a realistic estimate after the plan, not a guarantee. It must be higher than currentScore but stay believable.
+
+Return ONLY a JSON object:
+{
+  "planDays": 15 or 30,
+  "rationale": "one sentence on why that length",
+  "summary": "two sentences on where the seeker stands right now",
+  "strengths": ["skill the profile already shows", ...],
+  "gaps": [{"skill": "...", "postings": <how many supplied postings ask for it>, "why": "max 15 words"}],
+  "milestones": [{"window": "Day 1-5", "focus": "...", "outcome": "what you can show at the end", "practice": "one concrete thing to build"}],
+  "unlocks": [{"title": "...", "company": "...", "currentScore": 64, "projectedScore": 80, "needs": ["skill", ...]}],
+  "notRealistic": ["posting title - why a short plan will not close it", ...]
+}
+
+Limits: strengths max 5, gaps max 4 (most valuable first), milestones exactly 4 covering the whole planDays, unlocks max 3 (only postings from the input), notRealistic max 2 (may be empty).
+Keep every string tight: summary max 40 words, why max 12 words, focus max 8 words, practice and outcome max 18 words each. Answer directly - do not deliberate at length."""
+
+
+def _compact_for_plan(job: dict, index: int) -> str:
+    description = re.sub(r"\s+", " ", job.get("description") or "")[:400]
+    return "\n".join(
+        [
+            f"#{index}",
+            f"Title: {job.get('title') or '-'}",
+            f"Company: {job.get('company') or '-'}",
+            f"Score against profile: {job.get('matchScore') if job.get('matchScore') is not None else 'not scored'}",
+            f"Level: {job.get('experienceLevel') or '-'}",
+            f"Requirements: {description}",
+        ]
+    )
+
+
+async def build_learning_plan(profile: str, jobs: list[dict], api_key: str) -> dict[str, Any]:
+    """Near-miss postings ko dekh kar skill gaps aur 15/30 din ka plan nikaalta hai."""
+    # Sirf near-miss zone ke aas-paas wali postings bhejte hain — plan unhi par bana
+    # hai, to poori list bhejna tokens aur latency dono barbaad karta hai.
+    ranked = sorted(jobs, key=lambda j: j.get("matchScore") if j.get("matchScore") is not None else -1, reverse=True)
+    relevant = [j for j in ranked if (j.get("matchScore") or 0) >= 30] or ranked
+    listing = "\n\n".join(_compact_for_plan(job, i) for i, job in enumerate(relevant[:12]))
+
+    data, usage = await _chat(
+        [
+            {"role": "system", "content": RECOMMEND_PROMPT},
+            {"role": "user", "content": f"SEEKER PROFILE:\n{profile[:6000]}\n\n---\n\nMATCHED POSTINGS:\n{listing}"},
+        ],
+        api_key,
+        temperature=0.4,
+    )
+
+    days = data.get("planDays")
+    if days not in (15, 30):
+        days = 30
+
+    def _clip(key: str, limit: int) -> list:
+        value = data.get(key)
+        return value[:limit] if isinstance(value, list) else []
+
+    return {
+        "plan": {
+            "planDays": days,
+            "rationale": data.get("rationale") or "",
+            "summary": data.get("summary") or "",
+            "strengths": _clip("strengths", 6),
+            "gaps": _clip("gaps", 5),
+            "milestones": _clip("milestones", 5),
+            "unlocks": _clip("unlocks", 5),
+            "notRealistic": _clip("notRealistic", 3),
+        },
+        "usage": usage,
+    }

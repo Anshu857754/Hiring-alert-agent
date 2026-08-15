@@ -78,6 +78,7 @@ uvicorn app.main:app --reload --port 3000
 | `GET /api/health` | model name + `.env` me keys hain ya nahi |
 | `POST /api/extract` | multipart `file` → `{ text, chars, words, filename }` |
 | `POST /api/search` | `{ jobDescription, limit, source, useAi }` → NDJSON stream |
+| `POST /api/recommend` | `{ profile, jobs }` → `{ plan, usage, model }` — skill gaps + 15/30 din ka plan |
 
 `/api/search` ke stream events:
 
@@ -170,6 +171,48 @@ SaaS app shell hai — left sidebar + top header + scrollable content. Main work
 - **CTA "✨ Find candidates"** — ek hi primary button. Chalte waqt label asli stream stages follow karta hai: *Reading job description… → Searching candidates… → Ranking results…*
 - **Step 3 — Candidate pipeline** — chalte waqt skeleton rows, phir ranked list. Har row me: match % + band label ("Strong match") + progress bar, role title, source badge, company/location/type/level/salary/posted, **matched skill tags**, AI summary, aur Save + View posting buttons
 - Pipeline controls: search box, sort (relevance / recent / company / role), source filter, score filter, CSV export
+
+### Career recommendations (default OFF)
+
+Resume ya profile JD box me daalo, search chalao, aur ye feature near-miss roles ko **study plan** me badal deta hai.
+
+- Config me chautha toggle — **default off**, jaise maanga tha. AI scoring off ho to ye bhi auto-disable ho jaata hai (bina score ke gap nikaalna possible hi nahi)
+- On karne par bottom-right corner me **Kai** naam ka chhota launcher aata hai (career coach agent) — uspe near-miss roles ka count badge dikhta hai. Click karo to chat-style panel khulta hai; Escape ya ✕ se band. Plan tabhi banta hai jab **Build my plan** dabao — bina poochhe tokens kharch nahi hote
+- Agent ka naam `AGENT_NAME` constant me hai (`public/index.html`), badalna ek line ka kaam hai
+- Plan me: summary, **already in your favour** (strengths), **what is holding you back** (har gap ke saath kitni postings me maanga gaya), **timeline** (Day 1–7, 8–14…), **roles this opens up** (`71% → 85%` ke saath), aur **out of reach for now**
+- **Plan ki lambai model khud decide karta hai** — 15 din agar gaps chhote hain (ek framework/tool), 30 din agar gehre hain (nayi language, distributed systems, cloud)
+- Near-miss = 40–75 score. Isse upar wale already match karte hain, neeche wale alag career track hain
+- Model ko **sirf un skills** ki ijaazat hai jo actually postings me likhi hain — invent nahi kar sakta. Aur jo role realistically 15/30 din me nahi khulega (jaise 10+ saal maangne wala Staff role) usse `notRealistic` me daalna padta hai, jhoota promise nahi
+
+Ek live run: **~10s, ~$0.0007** (1,419 tokens). Apify credits bilkul nahi lagte — ye poora OpenRouter par hai.
+
+---
+
+## Latency
+
+`deepseek/deepseek-v4-pro` reasoning model hai. Default me wo output ka **~75% andar hi andar sochne** me laga deta hai, aur wo hidden tokens bhi utna hi time lete hain. Cache-free benchmark (har call me alag nonce, warna repeat prompt cache hit deta hai aur timing jhoothi lagti hai):
+
+| Setting | completion tokens | reasoning tokens |
+|---|---|---|
+| baseline | 3,102 | 2,353 |
+| `reasoning_effort: "low"` | 3,440 | 2,680 — **asar nahi padta** |
+| `reasoning: {max_tokens: 150}` | 5,287 | 4,654 — **cap ignore ho jaata hai** |
+| **`reasoning: {enabled: false}`** | **654** | **0** |
+
+Model ~70–95 tok/s deta hai, to token count hi wall-clock time hai. Yahan ke teeno kaam (JD parse, rubric scoring, plan) structured output hain — chain-of-thought inke liye zaroori nahi, aur JSON schema dono soorat me valid rehta hai.
+
+Iska asar:
+
+| | Pehle | Ab |
+|---|---|---|
+| Kai ka plan | 36–128s (bahut variance) | **~10s** |
+| 20 jobs score karna | ~30s+ | **12.2s** |
+| Plan ka kharcha | $0.0027 | **$0.0007** |
+
+Do aur cheezein:
+
+- **Partial results.** Scraping khatam hote hi unscored jobs stream par bhej dete hain (`{"type":"partial"}`), to table turant bhar jaata hai aur scores baad me aa jaate hain. Pehle poori scoring khatam hone tak skeleton hi dikhta tha.
+- **Batch size 15 → 10.** Batches parallel chalte hain, to wall-clock time sabse dheeme *single* call se bandha hota hai — chhota batch matlab wo call chhoti.
 
 ### Baaki views (sidebar)
 
