@@ -39,21 +39,21 @@ async def extract(file: UploadFile = File(...)) -> JSONResponse:
     data = await file.read()
 
     if not data:
-        return JSONResponse({"error": "File khaali hai"}, status_code=400)
+        return JSONResponse({"error": "The file is empty"}, status_code=400)
     if len(data) > config.MAX_UPLOAD_BYTES:
         mb = config.MAX_UPLOAD_BYTES // (1024 * 1024)
-        return JSONResponse({"error": f"File {mb} MB se badi hai"}, status_code=400)
+        return JSONResponse({"error": f"File is larger than {mb} MB"}, status_code=400)
 
     try:
         result = await docs.extract_text(file.filename or "", data)
     except docs.UnsupportedFile as err:
         return JSONResponse({"error": str(err)}, status_code=400)
     except Exception as err:
-        return JSONResponse({"error": f"File padh nahi paya: {err}"}, status_code=422)
+        return JSONResponse({"error": f"Could not read the file: {err}"}, status_code=422)
 
     if not result["text"].strip():
         return JSONResponse(
-            {"error": "Is file me koi text nahi mila — shayad scanned PDF hai (sirf images)."},
+            {"error": "No text found in this file — it may be a scanned PDF (images only)."},
             status_code=422,
         )
 
@@ -65,11 +65,11 @@ async def search(req: SearchRequest):
     job_description = (req.jobDescription or "").strip()
 
     if len(job_description) < 20:
-        return JSONResponse({"error": "Job description kam se kam 20 characters ka hona chahiye"}, status_code=400)
+        return JSONResponse({"error": "Job description must be at least 20 characters"}, status_code=400)
     if not config.APIFY_API_KEY:
-        return JSONResponse({"error": "APIFY_API_KEY .env me nahi mila"}, status_code=500)
+        return JSONResponse({"error": "APIFY_API_KEY not found in .env"}, status_code=500)
     if req.useAi and not config.OPENROUTER_API_KEY:
-        return JSONResponse({"error": "OPENROUTER_API_KEY .env me nahi mila"}, status_code=500)
+        return JSONResponse({"error": "OPENROUTER_API_KEY not found in .env"}, status_code=500)
 
     capped_limit = min(config.MAX_LIMIT, max(config.MIN_LIMIT, req.limit))
 
@@ -95,10 +95,10 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
             params = {"title": None, "location": "India", "country": "IN", "summary": "", "mustHaveSkills": []}
 
             if req.useAi:
-                await progress("parse", f"{MODEL_ID} job description padh raha hai...")
+                await progress("parse", f"{MODEL_ID} is reading the job description...")
                 extracted = await extract_search_params(job_description, config.OPENROUTER_API_KEY)
                 params = extracted["params"]
-                await progress("parse", f"Search banaya: \"{params['title']}\" in {params['location']} ({params['country']})")
+                await progress("parse", f"Search built: \"{params['title']}\" in {params['location']} ({params['country']})")
             else:
                 # AI off ho to JD ki pehli line ko hi search keyword maan lete hain.
                 params["title"] = job_description.split("\n")[0].strip()[:60]
@@ -106,7 +106,7 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
 
             await send({"type": "params", "params": params, "limit": limit})
 
-            await progress("scrape", f"Apify chal raha hai (max {limit} jobs per source)...")
+            await progress("scrape", f"Apify is running (max {limit} jobs per source)...")
             jobs = await scrape_jobs(
                 title=params["title"],
                 location=params["location"],
@@ -116,11 +116,11 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
                 token=config.APIFY_API_KEY,
                 on_progress=progress,
             )
-            await progress("scrape", f"Total {len(jobs)} unique jobs mile")
+            await progress("scrape", f"Found {len(jobs)} unique jobs in total")
 
             usage = None
             if req.useAi and jobs:
-                await progress("score", f"{len(jobs)} jobs ko JD ke against match kar raha hoon...")
+                await progress("score", f"Matching {len(jobs)} jobs against the JD...")
                 scored = await score_jobs(
                     job_description,
                     jobs,

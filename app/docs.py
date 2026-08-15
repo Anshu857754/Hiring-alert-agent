@@ -46,7 +46,7 @@ async def extract_text(filename: str, data: bytes) -> dict:
     suffix = Path(filename or "").suffix.lower()
     if suffix not in ALLOWED_UPLOAD_EXTS:
         raise UnsupportedFile(
-            f"'{suffix or filename}' support nahi karta. PDF, DOCX, TXT, MD, HTML ya PPTX daaliye."
+            f"'{suffix or filename}' is not supported. Please use PDF, DOCX, TXT, MD, HTML or PPTX."
         )
 
     # markitdown blocking hai, isliye thread me chalate hain warna event loop atak jaata hai.

@@ -4,98 +4,1349 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hiring Agent</title>
-<link rel="stylesheet" href="styles.css">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- theme paint se pehle set hota hai taaki flash na ho -->
+<script>
+  (function () {
+    var mode = 'light';
+    try {
+      // Value JSON ke roop me store hoti hai ('"dark"'), isliye parse zaroori hai —
+      // raw padhne se data-theme='"dark"' ban jaata tha aur koi selector match hi nahi karta tha.
+      var raw = localStorage.getItem('ha.theme');
+      var saved = null;
+      if (raw) { try { saved = JSON.parse(raw); } catch (e) { saved = raw; } }
+      if (saved !== 'light' && saved !== 'dark') saved = null;
+      mode = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    } catch (e) { /* localStorage blocked — light hi rahega */ }
+    document.documentElement.setAttribute('data-theme', mode);
+  })();
+</script>
+
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN TOKENS
+   Har surface, border, text aur semantic color yahin define hota hai.
+   Components sirf inhi tokens ko use karte hain — koi raw hex nahi.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Light default bare :root par hai — agar data-theme kabhi missing ya galat ho
+   to bhi page tokenless (colorless) nahi ho sakta. Dark isse override karta hai. */
+:root {
+  color-scheme: light;
+
+  /* — backgrounds: app tinted, sidebar/cards pure white. separation
+       borders se aati hai, heavy shadows se nahi — */
+  /* Warm cream neutrals — cold gray ki jagah, taaki UI thodi soft lage.
+     Rang sirf accent ke liye. */
+  --bg-app:           #F7F4EF;
+  --bg-sidebar:       #FFFDFA;
+  --surface:          #FFFFFF;
+  --surface-elev:     #FFFFFF;
+  --surface-hover:    #F5F1EA;
+  --surface-sunken:   #FAF7F2;
+  --surface-selected: #EEEDFF;
+  --input-bg:         #FFFFFF;
+
+  /* — borders structure carry karti hain, isliye clearly visible — */
+  --border-subtle:    #F0EBE3;
+  --border:           #E4DDD2;
+  --border-strong:    #CFC5B7;
+  /* toggle-off aur unchecked checkbox ka ekmatra visual boundary —
+     WCAG 1.4.11 ke liye 3:1 chahiye, isliye alag token */
+  --border-control:   #78706A;
+
+  /* — text (contrast measured against --surface #FFFFFF) — */
+  --text-primary:     #1C1917;
+  --text-strong:      #3A342F;
+  --text-secondary:   #57534E;
+  --text-muted:       #6E6862;
+  --text-disabled:    #A8A29E;   /* disabled — WCAG exempt */
+  --text-inverse:     #FFFFFF;
+
+  /* — brand: deep indigo. intelligence + precision + trust — */
+  --brand:            #4F46E5;
+  --brand-hover:      #4338CA;
+  --brand-active:     #3730A3;
+  --brand-subtle:     #EEEDFF;
+  --brand-border:     #C9C7FB;
+  --brand-text:       #4338CA;   /* text/icon weight on light surfaces */
+  --brand-on:         #FFFFFF;   /* label that sits on --brand */
+
+  /* — semantic: base = fill/indicator (3:1), text = readable variant (4.5:1) — */
+  --success:          #059669;  --success-subtle: #ECFDF5;  --success-border: #A7F3D0;  --success-text: #047857;
+  --warning:          #D97706;  --warning-subtle: #FFFBEB;  --warning-border: #FDE68A;  --warning-text: #B45309;
+  --error:            #DC2626;  --error-subtle:   #FEF2F2;  --error-border:   #FECACA;  --error-text:   #B91C1C;
+  --info:             #2563EB;  --info-subtle:    #EFF6FF;  --info-border:    #BFDBFE;  --info-text:    #1D4ED8;
+  --neutral-subtle:   #F2EEE7;  --neutral-border: #E4DDD2;  --neutral-fill:   #A8A29E;
+
+  --focus-ring:       #4F46E5;
+  --focus-halo:       rgba(79, 70, 229, .20);
+
+  /* — elevation: warm shadow, cream ke saath neutral grey ganda lagta hai.
+       Teen layers — contact, spread, aur ek chaudi ambient — taaki cards
+       sach me utthe hue lagein, sirf outline na dikhein. */
+  --shadow-sm: 0 1px 2px rgba(41, 33, 24, .10), 0 2px 4px -1px rgba(41, 33, 24, .07);
+  --shadow-md: 0 2px 4px rgba(41, 33, 24, .08), 0 10px 22px -6px rgba(41, 33, 24, .20), 0 24px 48px -24px rgba(41, 33, 24, .18);
+  --shadow-lg: 0 4px 8px rgba(41, 33, 24, .10), 0 18px 40px -10px rgba(41, 33, 24, .30), 0 40px 72px -36px rgba(41, 33, 24, .26);
+  --overlay:   rgba(28, 25, 23, .40);
+  --skeleton:  #EBE5DC;
+  --skeleton-hi: #F7F4EF;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* — deep navy-charcoal, pure black nahi. har level distinguishable — */
+  /* Near-black neutral canvas. Cards sirf halka sa upar hain — structure
+     borders se aati hai, badi luminance jump se nahi (wo gray slabs bana deti hai). */
+  --bg-app:           #0B0A09;
+  --bg-sidebar:       #100E0C;
+  --surface:          #1A1815;
+  --surface-elev:     #24211C;
+  --surface-hover:    #221F1B;
+  --surface-sunken:   #121110;
+  --surface-selected: #201E33;
+  --input-bg:         #121110;
+
+  /* — borders yahan asli structure hain, isliye clearly readable — */
+  --border-subtle:    #272420;
+  --border:           #4A443E;
+  --border-strong:    #625B53;
+  --border-control:   #928B83;
+
+  /* — text (contrast measured against --surface #1A1815) — */
+  --text-primary:     #FAFAF9;
+  --text-strong:      #E7E5E4;
+  --text-secondary:   #A8A29E;
+  --text-muted:       #8E8781;
+  --text-disabled:    #5C5650;
+  --text-inverse:     #0B0A09;
+
+  /* — brand: electric indigo, bright fill carries a near-black label — */
+  --brand:            #7A85FF;
+  --brand-hover:      #949CFF;
+  --brand-active:     #B4B9FF;
+  --brand-subtle:     #201E33;
+  --brand-border:     #3E3C7E;
+  --brand-text:       #A5ABFF;
+  --brand-on:         #0B0A09;
+
+  /* — semantic — */
+  --success:          #3ECF8E;  --success-subtle: #0C2018;  --success-border: #1B4634;  --success-text: #6EE7B7;
+  --warning:          #F5B33C;  --warning-subtle: #241B08;  --warning-border: #4A3712;  --warning-text: #FBCF6B;
+  --error:            #F0655B;  --error-subtle:   #26100F;  --error-border:   #5A211D;  --error-text:   #FCA5A5;
+  --info:             #5B9DF9;  --info-subtle:    #0E1A2B;  --info-border:    #1E3A5C;  --info-text:    #93C5FD;
+  --neutral-subtle:   #24211C;  --neutral-border: #4A443E;  --neutral-fill:   #57534E;
+
+  --focus-ring:       #7A85FF;
+  --focus-halo:       rgba(122, 133, 255, .26);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .55), 0 2px 4px -1px rgba(0, 0, 0, .40);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, .45), 0 10px 22px -6px rgba(0, 0, 0, .60), 0 24px 48px -24px rgba(0, 0, 0, .55);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, .50), 0 18px 40px -10px rgba(0, 0, 0, .70), 0 40px 72px -36px rgba(0, 0, 0, .60);
+  --overlay:   rgba(2, 6, 23, .70);
+  --skeleton:  #24211C;
+  --skeleton-hi: #322D27;
+}
+
+html, body, #root { height: 100%; }
+body {
+  overflow: hidden;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* theme switch ke waqt bade surfaces ko halka cross-fade */
+body, .themed { transition: background-color .18s ease, border-color .18s ease, color .18s ease; }
+
+/* Scrollbar bhi tokens par — default gray cream palette se alag lagta hai.
+   Thumb par 4px transparent border hai jo content-box clip ke saath
+   padding ka kaam karta hai, isliye wo patli aur rounded dikhti hai. */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+::-webkit-scrollbar { width: 14px; height: 14px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 999px;
+  border: 4px solid transparent;
+  background-clip: content-box;
+  transition: background-color .15s ease;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--text-disabled); background-clip: content-box; }
+::-webkit-scrollbar-thumb:active { background-color: var(--text-muted); background-clip: content-box; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.fade-up { animation: fadeUp .16s ease-out both; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+.toast-in { animation: toastIn .2s cubic-bezier(.16,1,.3,1) both; }
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton { position: relative; overflow: hidden; background: var(--skeleton); border-radius: 4px; }
+.skeleton::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--skeleton-hi), transparent);
+  animation: shimmer 1.4s infinite;
+}
+@keyframes barSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+.progress-indeterminate::after {
+  content: ''; position: absolute; inset-block: 0; width: 25%;
+  background: var(--brand); border-radius: 999px; animation: barSlide 1.3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+.boot { color: var(--text-muted); font: 14px Inter, system-ui; display: grid; place-items: center; height: 100%; }
+</style>
+
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script>
+  // Tailwind ki har color utility tokens par map hoti hai — isliye theme
+  // badalne par koi component peeche nahi chhoot sakta.
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'] },
+        fontSize: {
+          display: ['30px', { lineHeight: '36px', letterSpacing: '-.02em' }],
+          h1:      ['20px', { lineHeight: '28px', letterSpacing: '-.016em' }],
+          h2:      ['16px', { lineHeight: '24px', letterSpacing: '-.011em' }],
+          h3:      ['14px', { lineHeight: '20px', letterSpacing: '-.006em' }],
+          body:    ['14px', { lineHeight: '20px' }],
+          sm:      ['13px', { lineHeight: '18px' }],
+          xs:      ['12px', { lineHeight: '16px' }],
+        },
+        colors: {
+          app:      'var(--bg-app)',
+          sidebar:  'var(--bg-sidebar)',
+          surface:  { DEFAULT: 'var(--surface)', elev: 'var(--surface-elev)', hover: 'var(--surface-hover)', sunken: 'var(--surface-sunken)', selected: 'var(--surface-selected)' },
+          input:    'var(--input-bg)',
+          line:     { subtle: 'var(--border-subtle)', DEFAULT: 'var(--border)', strong: 'var(--border-strong)', control: 'var(--border-control)' },
+          fg:       { DEFAULT: 'var(--text-primary)', strong: 'var(--text-strong)', sec: 'var(--text-secondary)', muted: 'var(--text-muted)', disabled: 'var(--text-disabled)', inv: 'var(--text-inverse)' },
+          brand:    { DEFAULT: 'var(--brand)', hover: 'var(--brand-hover)', active: 'var(--brand-active)', subtle: 'var(--brand-subtle)', border: 'var(--brand-border)', text: 'var(--brand-text)', on: 'var(--brand-on)' },
+          success:  { DEFAULT: 'var(--success)', subtle: 'var(--success-subtle)', border: 'var(--success-border)', text: 'var(--success-text)' },
+          warning:  { DEFAULT: 'var(--warning)', subtle: 'var(--warning-subtle)', border: 'var(--warning-border)', text: 'var(--warning-text)' },
+          error:    { DEFAULT: 'var(--error)', subtle: 'var(--error-subtle)', border: 'var(--error-border)', text: 'var(--error-text)' },
+          info:     { DEFAULT: 'var(--info)', subtle: 'var(--info-subtle)', border: 'var(--info-border)', text: 'var(--info-text)' },
+          neutral:  { subtle: 'var(--neutral-subtle)', border: 'var(--neutral-border)', fill: 'var(--neutral-fill)' },
+          skeleton: 'var(--skeleton)',
+          overlay:  'var(--overlay)',
+        },
+        boxShadow: { sm: 'var(--shadow-sm)', md: 'var(--shadow-md)', lg: 'var(--shadow-lg)', none: 'none' },
+        ringColor: { focus: 'var(--focus-ring)' },
+      },
+    },
+  };
+</script>
 </head>
-<body>
-<div class="wrap">
 
-  <header>
-    <h1>Hiring Agent</h1>
-    <div class="sub">JD paste kariye ya PDF daaliye — <code id="model">deepseek/deepseek-v4-pro</code> search banayega, Apify LinkedIn + Indeed scrape karega, aur results match score ke saath table me aayenge.</div>
-  </header>
+<body class="font-sans">
+<div id="root"><div class="boot">Loading&hellip;</div></div>
 
-  <div class="card">
-    <div class="jd-head">
-      <label for="jd">Job Description</label>
-      <div class="tabs">
-        <button class="tab on" type="button" data-pane="paste">Paste text</button>
-        <button class="tab" type="button" data-pane="upload">PDF / DOCX upload</button>
+<script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
+<script type="text/babel" data-type="module">
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'https://esm.sh/react@18.3.1';
+import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+import {
+  AlertTriangle, ArrowRight, Bookmark, BookmarkCheck, Building2, Check, CheckCircle2,
+  ChevronDown, Clock, Download, ExternalLink, FileText, History, Info, LayoutGrid, Loader2,
+  MapPin, Menu, Minus, Moon, Paperclip, Plus, Search, Settings, Sparkles, Sun, Trash2,
+  Users, X, XCircle,
+} from 'https://esm.sh/lucide-react@0.462.0?deps=react@18.3.1';
+
+/* ═══════════════════════ constants ═══════════════════════ */
+
+const COST_PER_JOB = 0.0026;
+const MIN_LIMIT = 10;   // app/config.py se match
+const MAX_LIMIT = 30;
+const STEP = 5;
+const PLAN_BUDGET = 5;
+
+// Backend sirf linkedin + indeed leta hai (app/main.py ka Literal).
+const SOURCES = [
+  { id: 'linkedin', label: 'LinkedIn', ready: true },
+  { id: 'indeed', label: 'Indeed', ready: true },
+  { id: 'glassdoor', label: 'Glassdoor', ready: false },
+  { id: 'wellfound', label: 'Wellfound', ready: false },
+];
+
+const NAV = [
+  { id: 'overview', label: 'Overview', icon: LayoutGrid },
+  { id: 'new', label: 'New Search', icon: Sparkles },
+  { id: 'searches', label: 'Searches', icon: History },
+  { id: 'matches', label: 'Matches', icon: Users },
+  { id: 'saved', label: 'Saved', icon: Bookmark },
+];
+
+const SAMPLE_JD = `Senior Backend Engineer — Bengaluru (Hybrid)
+
+We are hiring a Senior Backend Engineer with 5+ years of experience building REST APIs at scale.
+
+Must have: Python, FastAPI, PostgreSQL, AWS, Redis, Kafka, Docker.
+Nice to have: Kubernetes, event-driven architecture, observability tooling.
+
+You will own service design, drive code reviews, and mentor two junior engineers.`;
+
+const SORTS = [
+  { id: 'relevance', label: 'Relevance' },
+  { id: 'recent', label: 'Most recent' },
+  { id: 'company', label: 'Company A–Z' },
+  { id: 'title', label: 'Role A–Z' },
+];
+const SCORE_FILTERS = [
+  { id: 'all', label: 'Any score' },
+  { id: '75', label: 'Strong (75+)' },
+  { id: '55', label: 'Good (55+)' },
+];
+
+/* ═══════════════════════ helpers ═══════════════════════ */
+
+const store = {
+  get(k, f) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : f; } catch { return f; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+const jobKey = (j) => j.url || `${j.source}:${j.title}:${j.company}`;
+
+/* Score band: color ke saath hamesha ek text label bhi jaata hai,
+   taaki matlab sirf rang se na nikalna pade. */
+function scoreBand(score) {
+  if (score == null) return { label: 'Not scored', text: 'text-fg-muted', bar: 'bg-line-strong' };
+  if (score >= 75) return { label: 'Strong match', text: 'text-success-text', bar: 'bg-success' };
+  if (score >= 55) return { label: 'Good match', text: 'text-warning-text', bar: 'bg-warning' };
+  if (score >= 35) return { label: 'Partial match', text: 'text-fg-sec', bar: 'bg-line-strong' };
+  return { label: 'Weak match', text: 'text-fg-muted', bar: 'bg-line-strong' };
+}
+
+/* Backend per-job skills nahi deta — JD ke skills me se wahi dikhate hain
+   jo posting ke text me actually mile. */
+function matchedSkills(job, skills) {
+  if (!skills?.length) return [];
+  const hay = `${job.title || ''} ${job.description || ''}`.toLowerCase();
+  return skills.filter((s) => s && hay.includes(String(s).toLowerCase())).slice(0, 4);
+}
+
+const fmtBytes = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+const timeAgo = (iso) => {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
+
+/* ═══════════════════════ primitives ═══════════════════════ */
+
+const ring = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-app';
+
+function Button({ variant = 'secondary', size = 'md', className = '', children, ...rest }) {
+  const base = `inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50 active:translate-y-px ${ring}`;
+  const sizes = { sm: 'h-8 px-3 text-sm', md: 'h-9 px-3 text-sm', lg: 'h-10 px-4 text-body' };
+  const variants = {
+    primary: 'bg-brand text-brand-on shadow-md hover:bg-brand-hover active:bg-brand-active',
+    secondary: 'border border-line bg-surface text-fg-sec shadow-sm hover:bg-surface-hover hover:border-line-strong',
+    ghost: 'text-fg-muted hover:bg-surface-hover hover:text-fg',
+    danger: 'border border-line bg-surface text-fg-muted hover:border-error-border hover:bg-error-subtle hover:text-error-text',
+  };
+  return <button className={`${base} ${sizes[size]} ${variants[variant]} ${className}`} {...rest}>{children}</button>;
+}
+
+function Card({ className = '', children, ...rest }) {
+  return <div className={`themed rounded-xl border border-line bg-surface shadow-md ${className}`} {...rest}>{children}</div>;
+}
+
+function SectionHead({ step, title, description, aside }) {
+  return (
+    <div className="mb-4 flex items-end justify-between gap-4">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          {step && (
+            <span aria-hidden className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-brand-border bg-brand-subtle text-sm font-semibold text-brand-text">
+              {step}
+            </span>
+          )}
+          <h2 className="text-h2 font-semibold text-fg">{title}</h2>
+        </div>
+        {description && <p className={`mt-1 text-sm text-fg-sec ${step ? 'pl-8' : ''}`}>{description}</p>}
       </div>
+      {aside}
     </div>
+  );
+}
 
-    <div class="pane on" id="pane-paste">
-      <textarea id="jd" placeholder="Poora job description yahan paste kariye...
+/* Toggle: ON/OFF sirf rang se nahi — knob ke andar check/cross icon
+   aur bagal me text label bhi state batata hai. */
+function Toggle({ on, onChange, id, describedBy, disabled }) {
+  return (
+    <button
+      type="button" role="switch" aria-checked={on} id={id} aria-describedby={describedBy} disabled={disabled}
+      onClick={() => onChange(!on)}
+      className={`group relative h-5 w-9 shrink-0 rounded-full border transition-colors duration-200 disabled:opacity-50 ${ring} ${
+        on ? 'border-brand bg-brand' : 'border-line-control bg-surface-hover hover:border-fg-sec'
+      }`}
+    >
+      <span className={`absolute top-px grid h-[18px] w-[18px] place-items-center rounded-full bg-surface shadow-sm transition-transform duration-200 ${on ? 'translate-x-[18px]' : 'translate-x-px'}`}>
+        {on
+          ? <Check size={11} strokeWidth={3.5} aria-hidden className="text-brand-text" />
+          : <X size={10} strokeWidth={3} aria-hidden className="text-fg-muted" />}
+      </span>
+    </button>
+  );
+}
 
-Example:
-We are hiring a Senior Backend Engineer in Bengaluru.
-5+ years experience with Node.js, PostgreSQL, AWS and microservices.
-Must have experience building REST APIs at scale."></textarea>
+function Select({ value, onChange, options, label, className = '' }) {
+  return (
+    <div className={`relative ${className}`}>
+      <select
+        aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}
+        className={`h-8 w-full cursor-pointer appearance-none rounded-md border border-line bg-input pl-2.5 pr-7 text-sm font-medium text-fg-sec shadow-sm transition-colors hover:border-line-strong ${ring}`}
+      >
+        {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+      <ChevronDown size={14} aria-hidden className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-fg-muted" />
     </div>
+  );
+}
 
-    <div class="pane" id="pane-upload">
-      <div class="drop" id="drop">
-        <div class="big">JD file yahan drop kariye ya click karke chuniye</div>
-        <div class="small">PDF, DOCX, PPTX, TXT, MD, HTML &mdash; max 10 MB</div>
-        <div class="pill">markitdown se local parse &mdash; koi LLM token kharch nahi</div>
-        <input type="file" id="file" accept=".pdf,.docx,.doc,.txt,.md,.html,.htm,.rtf,.pptx" hidden>
-      </div>
-      <div class="file-row" id="fileRow"></div>
-      <div class="preview" id="preview"></div>
+/* Status message — icon + status word + text. Rang teesra signal hai, akela nahi. */
+const STATUS = {
+  success: { Icon: CheckCircle2, word: 'Success', cls: 'text-success-text', bg: 'bg-success-subtle', bd: 'border-success-border' },
+  error:   { Icon: XCircle,      word: 'Error',   cls: 'text-error-text',   bg: 'bg-error-subtle',   bd: 'border-error-border' },
+  warning: { Icon: AlertTriangle,word: 'Warning', cls: 'text-warning-text', bg: 'bg-warning-subtle', bd: 'border-warning-border' },
+  info:    { Icon: Info,         word: 'Info',    cls: 'text-info-text',    bg: 'bg-info-subtle',    bd: 'border-info-border' },
+};
+
+function InlineStatus({ type = 'error', children }) {
+  const { Icon, word, cls, bg, bd } = STATUS[type];
+  return (
+    <p className={`fade-up mt-2 flex items-start gap-2 rounded-md border ${bd} ${bg} px-3 py-2 text-sm ${cls}`}>
+      <Icon size={14} aria-hidden className="mt-px shrink-0" />
+      <span><span className="font-semibold">{word}:</span> {children}</span>
+    </p>
+  );
+}
+
+function Toasts({ items, dismiss }) {
+  return (
+    <div role="status" aria-live="polite"
+         className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+      {items.map((t) => {
+        const { Icon, word, cls } = STATUS[t.type] || STATUS.info;
+        return (
+          <div key={t.id} className="toast-in themed pointer-events-auto flex items-start gap-2.5 rounded-lg border border-line bg-surface-elev p-3 shadow-lg">
+            <Icon size={15} aria-hidden className={`mt-px shrink-0 ${cls}`} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-fg">
+                <span className="sr-only">{word}: </span>{t.title}
+              </p>
+              {t.body && <p className="mt-0.5 text-sm text-fg-muted">{t.body}</p>}
+            </div>
+            <button onClick={() => dismiss(t.id)} aria-label="Dismiss notification"
+                    className={`shrink-0 rounded p-0.5 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg ${ring}`}>
+              <X size={14} />
+            </button>
+          </div>
+        );
+      })}
     </div>
+  );
+}
 
-    <div class="controls">
-      <div class="ctl grow">
-        <label for="limit">Jobs per source (10&ndash;30)</label>
-        <div class="slider-row">
-          <input type="range" id="limit" min="10" max="30" step="5" value="10">
-          <span class="limit-val" id="limitVal">10</span>
+/* ═══════════════════════ theme switch ═══════════════════════ */
+
+/* Day/night switch — thumb slide karta hai, active side ka symbol highlight
+   hota hai. role="switch" so keyboard/screen-reader ko on/off saaf pata chale. */
+function ThemeSwitch({ theme, setTheme }) {
+  const dark = theme === 'dark';
+  return (
+    <button
+      type="button" role="switch" aria-checked={dark}
+      aria-label={dark ? 'Dark mode on, switch to light' : 'Dark mode off, switch to dark'}
+      title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+      onClick={() => setTheme(dark ? 'light' : 'dark')}
+      className={`relative flex h-8 w-[60px] shrink-0 items-center rounded-full border border-line bg-surface-sunken transition-colors hover:border-line-strong ${ring}`}
+    >
+      <span aria-hidden
+            className={`absolute top-[3px] h-6 w-[27px] rounded-full bg-brand shadow-sm transition-transform duration-300 ease-out ${dark ? 'translate-x-[30px]' : 'translate-x-[3px]'}`} />
+      <span aria-hidden className="relative z-10 grid w-1/2 place-items-center">
+        <Sun size={14} strokeWidth={2.4} className={dark ? 'text-fg-muted' : 'text-brand-on'} />
+      </span>
+      <span aria-hidden className="relative z-10 grid w-1/2 place-items-center">
+        <Moon size={14} strokeWidth={2.4} className={dark ? 'text-brand-on' : 'text-fg-muted'} />
+      </span>
+    </button>
+  );
+}
+
+/* ═══════════════════════ sidebar ═══════════════════════ */
+
+function Sidebar({ view, setView, savedCount, spend, onNavigate }) {
+  const left = PLAN_BUDGET - spend;
+  const pct = Math.min(100, (spend / PLAN_BUDGET) * 100);
+  const low = left < 1;
+
+  return (
+    <div className="themed flex h-full w-60 shrink-0 flex-col border-r border-line bg-sidebar">
+      <div className="flex h-14 items-center gap-2.5 px-4">
+        <div aria-hidden className="grid h-7 w-7 place-items-center rounded-md bg-brand text-xs font-bold text-brand-on">HA</div>
+        <div className="min-w-0">
+          <p className="truncate text-h3 font-semibold text-fg">Hiring Agent</p>
         </div>
       </div>
 
-      <div class="ctl">
-        <label for="source">Sources</label>
-        <select id="source">
-          <option value="both">LinkedIn + Indeed</option>
-          <option value="linkedin">Sirf LinkedIn</option>
-          <option value="indeed">Sirf Indeed</option>
-        </select>
+      <nav aria-label="Main" className="flex-1 space-y-0.5 px-3 py-2">
+        {NAV.map(({ id, label, icon: Icon }) => {
+          const active = view === id;
+          return (
+            <button
+              key={id} onClick={() => { setView(id); onNavigate?.(); }} aria-current={active ? 'page' : undefined}
+              className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${ring} ${
+                active ? 'bg-surface-selected font-semibold text-brand-text' : 'font-medium text-fg-sec hover:bg-surface-hover hover:text-fg'
+              }`}
+            >
+              {active && <span aria-hidden className="absolute -left-1.5 top-1 bottom-1 w-[3px] rounded-full bg-brand" />}
+              <Icon size={15} aria-hidden className={active ? 'text-brand-text' : 'text-fg-muted'} />
+              <span className="flex-1 text-left">{label}</span>
+              {id === 'saved' && savedCount > 0 && (
+                <span className="rounded border border-line bg-surface px-1.5 text-xs font-semibold tabular-nums text-fg-sec">{savedCount}</span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="space-y-2 border-t border-line p-3">
+        {/* credits — low par warning icon + text, sirf rang par nirbhar nahi */}
+        <div className={`rounded-md border p-3 ${low ? 'border-warning-border bg-warning-subtle' : 'border-line bg-surface'}`}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-fg-sec">
+              {low && <AlertTriangle size={12} aria-hidden className="text-warning-text" />}
+              {low ? 'Low credits' : 'Apify credits'}
+            </span>
+            <span className="text-xs tabular-nums text-fg-muted">${left.toFixed(2)} left</span>
+          </div>
+          <div role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}
+               aria-label="Estimated credit usage"
+               className="mt-2 h-1 overflow-hidden rounded-full bg-neutral-subtle">
+            {/* neutral fill — credits main workflow se compete nahi karti.
+                brand color sirf tab jab credits actually kam hon */}
+            <div className={`h-full rounded-full transition-[width] duration-500 ${low ? 'bg-warning' : 'bg-neutral-fill'}`} style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-1.5 text-xs text-fg-muted">Estimated from local runs</p>
+        </div>
+
+        <button className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-fg-sec transition-colors hover:bg-surface-hover hover:text-fg ${ring}`}>
+          <Settings size={15} aria-hidden className="text-fg-muted" /> Settings
+        </button>
+
+        <div className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5">
+          <div aria-hidden className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-surface-hover text-xs font-semibold text-fg-sec">A</div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-fg">Anshu</p>
+            <p className="truncate text-xs text-fg-muted">Free plan</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════ job description ═══════════════════════ */
+
+function JdSection({ jd, setJd, attached, setAttached, uploading, uploadFile, error }) {
+  const fileRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const depth = useRef(0);
+
+  return (
+    <section aria-labelledby="jd-head">
+      <SectionHead
+        step="1" title={<span id="jd-head">Start with your job description</span>}
+        description="Paste your JD or upload a document. We'll extract the role, skills, and requirements automatically."
+        aside={<Button size="sm" onClick={() => setJd(SAMPLE_JD)}><Sparkles size={13} aria-hidden className="text-brand-text" /> Sample JD</Button>}
+      />
+
+      <div
+        onDragEnter={(e) => { e.preventDefault(); depth.current++; setDragging(true); }}
+        onDragOver={(e) => e.preventDefault()}
+        onDragLeave={() => { if (--depth.current <= 0) { depth.current = 0; setDragging(false); } }}
+        onDrop={(e) => { e.preventDefault(); depth.current = 0; setDragging(false); if (e.dataTransfer.files?.[0]) uploadFile(e.dataTransfer.files[0]); }}
+        className={`themed relative overflow-hidden rounded-xl border bg-surface shadow-md transition-colors focus-within:border-brand focus-within:ring-4 focus-within:ring-[color:var(--focus-halo)] ${
+          error ? 'border-error-border' : dragging ? 'border-brand' : 'border-line'
+        }`}
+      >
+        <label htmlFor="jd" className="sr-only">Job description</label>
+        <textarea
+          id="jd" value={jd} onChange={(e) => setJd(e.target.value)} spellCheck={false}
+          aria-invalid={!!error} aria-describedby={error ? 'jd-error' : undefined}
+          placeholder="Paste your job description, role, requirements, or skills here..."
+          className="block h-40 w-full resize-none border-0 bg-transparent px-4 py-3 text-body leading-6 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-0"
+        />
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-subtle bg-surface-sunken px-3 py-2">
+          {attached ? (
+            <span className="fade-up inline-flex min-w-0 items-center gap-2 rounded-md border border-line bg-surface py-1 pl-2 pr-1 shadow-sm">
+              <FileText size={14} aria-hidden className="shrink-0 text-brand-text" />
+              <span className="truncate text-sm font-medium text-fg">{attached.name}</span>
+              <span className="shrink-0 text-xs tabular-nums text-fg-muted">{fmtBytes(attached.size)}</span>
+              <button onClick={() => { setAttached(null); if (fileRef.current) fileRef.current.value = ''; }}
+                      aria-label={`Remove ${attached.name}`}
+                      className={`shrink-0 rounded p-1 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg ${ring}`}>
+                <X size={12} />
+              </button>
+            </span>
+          ) : (
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+                    className={`inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm font-medium text-fg-strong transition-colors hover:bg-surface hover:text-fg disabled:opacity-60 ${ring}`}>
+              {uploading
+                ? <><Loader2 size={14} aria-hidden className="animate-spin text-brand-text" /> Reading document…</>
+                : <><Paperclip size={14} aria-hidden className="text-fg-sec" /> Upload PDF or DOCX</>}
+            </button>
+          )}
+          <span className="flex items-center gap-3 text-xs text-fg-muted">
+            {jd.trim().length > 0 && <span className="tabular-nums">{jd.trim().length.toLocaleString()} characters</span>}
+            <span>Max 10 MB</span>
+          </span>
+        </div>
+
+        <input ref={fileRef} type="file" className="sr-only"
+               accept=".pdf,.docx,.doc,.txt,.md,.html,.htm,.rtf,.pptx"
+               onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])} />
+
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-lg border-2 border-dashed border-brand bg-brand-subtle">
+            <span className="text-body font-semibold text-brand-text">Drop your JD to read it</span>
+          </div>
+        )}
       </div>
 
-      <div class="ctl">
-        <label>AI Matching</label>
-        <div class="check"><input type="checkbox" id="useAi" checked><span>Score &amp; rank karo</span></div>
+      {error && <span id="jd-error"><InlineStatus type="error">{error}</InlineStatus></span>}
+    </section>
+  );
+}
+
+/* ═══════════════════════ source multi-select ═══════════════════════ */
+
+function SourcePicker({ selected, toggle, invalid }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const down = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    const key = (e) => { if (e.key === 'Escape') { setOpen(false); box.current?.querySelector('button')?.focus(); } };
+    document.addEventListener('mousedown', down);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
+  }, [open]);
+
+  const chosen = SOURCES.filter((s) => selected.includes(s.id));
+
+  return (
+    <div ref={box} className="relative">
+      <button
+        type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open}
+        className={`flex h-8 w-full items-center gap-2 rounded-md border bg-input px-2.5 text-sm shadow-sm transition-colors hover:border-line-strong ${ring} ${
+          invalid ? 'border-error-border' : 'border-line'
+        }`}
+      >
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          {chosen.length === 0
+            ? <span className="text-fg-muted">Select at least one</span>
+            : chosen.map((s) => (
+                <span key={s.id} className="shrink-0 rounded border border-line bg-surface-hover px-1.5 text-xs font-medium text-fg-sec">{s.label}</span>
+              ))}
+        </span>
+        <ChevronDown size={14} aria-hidden className={`shrink-0 text-fg-muted transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <ul role="listbox" aria-multiselectable="true"
+            className="fade-up themed absolute inset-x-0 top-[calc(100%+4px)] z-30 overflow-hidden rounded-md border border-line bg-surface-elev p-1 shadow-lg">
+          {SOURCES.map((s) => {
+            const on = selected.includes(s.id);
+            return (
+              <li key={s.id} role="option" aria-selected={on} aria-disabled={!s.ready}>
+                <button type="button" disabled={!s.ready} onClick={() => toggle(s.id)}
+                        className={`flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left text-sm transition-colors ${ring} ${
+                          s.ready ? 'text-fg hover:bg-surface-hover' : 'cursor-not-allowed text-fg-disabled'
+                        }`}>
+                  <span aria-hidden className={`grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors ${
+                    on ? 'border-brand bg-brand' : 'border-line-control bg-surface'
+                  }`}>
+                    {on && <Check size={11} strokeWidth={3} className="text-brand-on" />}
+                  </span>
+                  <span className="flex-1 font-medium">{s.label}</span>
+                  {!s.ready && <span className="rounded border border-line px-1.5 text-xs font-medium text-fg-muted">Soon</span>}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════ search configuration ═══════════════════════ */
+
+/* Teeno settings ka structure bilkul ek jaisa hai —
+   label → hint → control row → status. Har slot ki min-height fix hai
+   taaki teeno columns ki lines aapas me align rahein. */
+function Setting({ label, hint, htmlFor, children, status }) {
+  return (
+    <div className="flex flex-col px-4 py-4">
+      <label htmlFor={htmlFor} className="block text-h3 font-semibold text-fg">{label}</label>
+      <p className="mt-1 min-h-[36px] text-sm text-fg-muted">{hint}</p>
+      <div className="mt-1 flex min-h-[32px] items-center gap-3">{children}</div>
+      <div className="mt-2 min-h-[18px] text-sm">{status}</div>
+    </div>
+  );
+}
+
+function ConfigSection({ limit, setLimit, sources, toggleSource, useAi, setUseAi, cost, busy, stage, onRun }) {
+  return (
+    <section aria-labelledby="cfg-head">
+      <SectionHead step="2" title={<span id="cfg-head">Search configuration</span>}
+                   description="Choose how wide to search and whether the AI should rank what it finds." />
+
+      <Card>
+        <div className="divide-y divide-line-subtle lg:grid lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+
+          <Setting
+            label="Jobs to find" htmlFor="limit"
+            hint={`How many postings to pull from each source (${MIN_LIMIT}–${MAX_LIMIT}).`}
+            status={<span className="text-fg-muted">Est. cost <span className="font-medium tabular-nums text-fg-sec">~${cost}</span></span>}
+          >
+              <div className="flex h-8 items-center rounded-md border border-line bg-input shadow-sm">
+                <button type="button" onClick={() => setLimit(Math.max(MIN_LIMIT, limit - STEP))} disabled={limit <= MIN_LIMIT}
+                        aria-label="Decrease jobs to find"
+                        className={`grid h-full w-8 place-items-center rounded-l-md text-fg-sec transition-colors hover:bg-surface-hover disabled:text-fg-disabled disabled:hover:bg-transparent ${ring}`}>
+                  <Minus size={14} />
+                </button>
+                <input id="limit" type="text" inputMode="numeric" value={limit} readOnly
+                       aria-label="Jobs to find per source"
+                       className="h-full w-12 border-x border-line bg-transparent text-center text-h3 font-semibold tabular-nums text-fg focus:outline-none" />
+                <button type="button" onClick={() => setLimit(Math.min(MAX_LIMIT, limit + STEP))} disabled={limit >= MAX_LIMIT}
+                        aria-label="Increase jobs to find"
+                        className={`grid h-full w-8 place-items-center rounded-r-md text-fg-sec transition-colors hover:bg-surface-hover disabled:text-fg-disabled disabled:hover:bg-transparent ${ring}`}>
+                  <Plus size={14} />
+                </button>
+              </div>
+          </Setting>
+
+          <Setting
+            label="Job sources"
+            hint="Which job boards the postings are scraped from."
+            status={sources.length === 0
+              ? <span className="flex items-center gap-1.5 text-error-text"><AlertTriangle size={12} aria-hidden /> Pick at least one source.</span>
+              : <span className="text-fg-muted">{sources.length} selected · ~{limit * sources.length} postings</span>}
+          >
+            <div className="w-full"><SourcePicker selected={sources} toggle={toggleSource} invalid={sources.length === 0} /></div>
+          </Setting>
+
+          <Setting
+            label="AI scoring &amp; ranking" htmlFor="ai"
+            hint="Evaluate and rank every posting against the requirements."
+            /* status brand color me hai, green me nahi — ye product ka primary
+               control hai, success message nahi */
+            status={<span id="ai-state" className="text-fg-muted">
+              {useAi ? '— adds ~30s and OpenRouter tokens' : '— scraping only, no scores'}
+            </span>}
+          >
+            <Toggle id="ai" on={useAi} onChange={setUseAi} describedBy="ai-state" />
+            <span className="flex items-center gap-1.5 text-sm">
+              {useAi
+                ? <><Check size={13} strokeWidth={3} aria-hidden className="text-brand-text" /><span className="font-semibold text-brand-text">Enabled</span></>
+                : <><X size={13} strokeWidth={3} aria-hidden className="text-fg-muted" /><span className="font-semibold text-fg-sec">Disabled</span></>}
+            </span>
+          </Setting>
+        </div>
+
+        <div className="flex flex-col gap-3 border-t border-line-subtle bg-surface-sunken px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-fg-muted">
+            {busy ? 'Usually takes 1.5–3 minutes.' : 'Results appear below as a ranked pipeline.'}
+          </p>
+          <Button variant="primary" size="lg" onClick={onRun} disabled={busy} className="w-full sm:w-auto">
+            {busy ? <><Loader2 size={15} aria-hidden className="animate-spin" /> {stage}</> : <><Sparkles size={15} aria-hidden /> Find candidates</>}
+          </Button>
+        </div>
+      </Card>
+    </section>
+  );
+}
+
+/* ═══════════════════════ result row ═══════════════════════ */
+
+function JobRow({ job, skills, saved, onSave }) {
+  const band = scoreBand(job.matchScore);
+  const tags = matchedSkills(job, skills);
+
+  return (
+    <li className="group px-4 py-3 transition-colors hover:bg-surface-hover">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+
+        <div className="flex shrink-0 items-center gap-2 sm:w-24 sm:flex-col sm:items-start sm:gap-1">
+          <span className={`text-h1 font-semibold leading-none tabular-nums ${band.text}`}>
+            {job.matchScore == null ? '—' : `${job.matchScore}%`}
+          </span>
+          <span className={`text-xs font-medium ${band.text}`}>{band.label}</span>
+          <div aria-hidden className="hidden h-1 w-full overflow-hidden rounded-full bg-neutral-subtle sm:block">
+            <div className={`h-full rounded-full ${band.bar}`} style={{ width: `${job.matchScore ?? 0}%` }} />
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-h3 font-semibold text-fg">{job.title || 'Untitled role'}</h3>
+            <span className="rounded border border-line bg-surface-hover px-1.5 text-xs font-medium text-fg-sec">
+              {job.source === 'linkedin' ? 'LinkedIn' : 'Indeed'}
+            </span>
+          </div>
+
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-fg-muted">
+            {job.company && <span className="inline-flex items-center gap-1"><Building2 size={12} aria-hidden />{job.company}</span>}
+            {job.location && <span className="inline-flex items-center gap-1"><MapPin size={12} aria-hidden />{job.location}</span>}
+            {job.contractType && <span>{job.contractType}</span>}
+            {job.experienceLevel && <span>{job.experienceLevel}</span>}
+            {job.salary && <span className="font-medium text-success-text">{job.salary}</span>}
+            {job.postedAt && <span className="inline-flex items-center gap-1"><Clock size={12} aria-hidden />{job.postedAt}</span>}
+          </div>
+
+          {tags.length > 0 && (
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {tags.map((t) => (
+                <li key={t} className="rounded border border-brand-border bg-brand-subtle px-1.5 text-xs font-medium text-brand-text">{t}</li>
+              ))}
+            </ul>
+          )}
+
+          {job.matchReason && (
+            <p className="mt-2 text-sm text-fg-muted">
+              <span className="font-medium text-fg-sec">AI summary — </span>{job.matchReason}
+            </p>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="sm" onClick={() => onSave(job)} aria-pressed={saved}
+                  aria-label={saved ? `Remove ${job.title} from saved` : `Save ${job.title}`}>
+            {saved ? <><BookmarkCheck size={13} aria-hidden className="text-brand-text" /> Saved</> : <><Bookmark size={13} aria-hidden /> Save</>}
+          </Button>
+          <a href={job.url || '#'} target="_blank" rel="noopener"
+             className={`inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-surface px-3 text-sm font-medium text-fg-sec shadow-sm transition-colors hover:border-line-strong hover:bg-surface-hover ${ring}`}>
+            View posting <ExternalLink size={12} aria-hidden />
+          </a>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <li className="px-4 py-3">
+      <div className="flex gap-4">
+        <div className="w-24 shrink-0 space-y-2">
+          <div className="skeleton h-5 w-12" /><div className="skeleton h-3 w-16" />
+        </div>
+        <div className="flex-1 space-y-2">
+          <div className="skeleton h-4 w-1/3" /><div className="skeleton h-3 w-2/3" />
+          <div className="flex gap-1.5"><div className="skeleton h-4 w-14" /><div className="skeleton h-4 w-16" /></div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/* ═══════════════════════ pipeline ═══════════════════════ */
+
+function Pipeline({ jobs, skills, busy, stage, savedKeys, onSave, onExport }) {
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState('relevance');
+  const [src, setSrc] = useState('all');
+  const [minScore, setMinScore] = useState('all');
+
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const out = jobs.filter((j) => {
+      if (needle && !`${j.title || ''} ${j.company || ''} ${j.location || ''}`.toLowerCase().includes(needle)) return false;
+      if (src !== 'all' && j.source !== src) return false;
+      if (minScore !== 'all' && (j.matchScore ?? -1) < +minScore) return false;
+      return true;
+    });
+    const by = {
+      relevance: (a, b) => (b.matchScore ?? -1) - (a.matchScore ?? -1),
+      recent: (a, b) => String(b.postedAt || '').localeCompare(String(a.postedAt || '')),
+      company: (a, b) => String(a.company || '').localeCompare(String(b.company || '')),
+      title: (a, b) => String(a.title || '').localeCompare(String(b.title || '')),
+    };
+    return [...out].sort(by[sort]);
+  }, [jobs, q, sort, src, minScore]);
+
+  if (busy) {
+    return (
+      <Card className="overflow-hidden">
+        <div className="border-b border-line-subtle px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Loader2 size={14} aria-hidden className="animate-spin text-brand-text" />
+            <span className="text-sm font-medium text-fg">{stage}</span>
+          </div>
+          <div className="progress-indeterminate relative mt-2 h-0.5 overflow-hidden rounded-full bg-neutral-subtle" />
+        </div>
+        <ul className="divide-y divide-line-subtle">{[0, 1, 2, 3, 4].map((i) => <SkeletonRow key={i} />)}</ul>
+      </Card>
+    );
+  }
+
+  if (!jobs.length) {
+    return (
+      <Card className="px-6 py-12">
+        <div className="mx-auto max-w-sm text-center">
+          <div aria-hidden className="mx-auto grid h-10 w-10 place-items-center rounded-lg border border-line bg-surface-sunken">
+            <Users size={18} className="text-fg-muted" />
+          </div>
+          <h3 className="mt-3 text-h3 font-semibold text-fg">Your candidate pipeline will appear here</h3>
+          <p className="mt-1 text-sm text-fg-muted">Start a search to discover and rank candidates based on your job description.</p>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle px-4 py-2.5">
+        <h3 className="mr-1 text-sm font-semibold text-fg">
+          {rows.length.toLocaleString()} <span className="font-normal text-fg-muted">of {jobs.length} matches</span>
+        </h3>
+        <div className="relative min-w-[180px] flex-1 sm:max-w-64">
+          <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search results"
+                 placeholder="Search role, company…"
+                 className={`h-8 w-full rounded-md border border-line bg-input pl-8 pr-3 text-sm text-fg shadow-sm placeholder:text-fg-muted transition-colors hover:border-line-strong ${ring}`} />
+        </div>
+        <Select value={sort} onChange={setSort} options={SORTS} label="Sort by" className="w-36" />
+        <Select value={src} onChange={setSrc} options={[{ id: 'all', label: 'All sources' }, { id: 'linkedin', label: 'LinkedIn' }, { id: 'indeed', label: 'Indeed' }]} label="Filter by source" className="w-32" />
+        <Select value={minScore} onChange={setMinScore} options={SCORE_FILTERS} label="Filter by score" className="w-32" />
+        <Button size="sm" onClick={onExport} className="ml-auto"><Download size={13} aria-hidden /> Export CSV</Button>
       </div>
 
-      <div class="ctl"><button id="go">Search Jobs</button></div>
-    </div>
+      {rows.length === 0 ? (
+        <div className="px-6 py-10 text-center">
+          <p className="text-h3 font-medium text-fg">No matches for these filters</p>
+          <p className="mt-1 text-sm text-fg-muted">Try clearing the search box or lowering the score filter.</p>
+          <Button size="sm" className="mt-3" onClick={() => { setQ(''); setSrc('all'); setMinScore('all'); }}>Clear filters</Button>
+        </div>
+      ) : (
+        <ul className="divide-y divide-line-subtle">
+          {rows.map((j) => <JobRow key={jobKey(j)} job={j} skills={skills} saved={savedKeys.has(jobKey(j))} onSave={onSave} />)}
+        </ul>
+      )}
+    </Card>
+  );
+}
 
-    <div class="hint" id="hint"></div>
-  </div>
+/* ═══════════════════════ secondary views ═══════════════════════ */
 
-  <div id="log">
-    <div class="log-box" id="logBox"></div>
-  </div>
+function StatTile({ label, value, hint }) {
+  return (
+    <Card className="p-4">
+      <p className="text-sm font-medium text-fg-muted">{label}</p>
+      <p className="mt-1.5 text-display font-semibold tabular-nums text-fg">{value}</p>
+      {hint && <p className="mt-1 text-xs text-fg-muted">{hint}</p>}
+    </Card>
+  );
+}
 
-  <div id="summary"></div>
+function EmptyState({ Icon, title, body }) {
+  return (
+    <Card className="px-6 py-12 text-center">
+      <div aria-hidden className="mx-auto grid h-10 w-10 place-items-center rounded-lg border border-line bg-surface-sunken">
+        <Icon size={18} className="text-fg-muted" />
+      </div>
+      <h3 className="mt-3 text-h3 font-semibold text-fg">{title}</h3>
+      <p className="mt-1 text-sm text-fg-muted">{body}</p>
+    </Card>
+  );
+}
 
-  <div id="results">
-    <div class="res-head">
-      <h2 id="resTitle"></h2>
-      <div style="display:flex;gap:10px;">
-        <input type="text" id="filter" placeholder="Filter by title/company...">
-        <button class="ghost" id="csv">Download CSV</button>
+function Overview({ history, spend, go }) {
+  const totalRoles = history.reduce((n, h) => n + h.count, 0);
+  const scored = history.flatMap((h) => h.jobs.map((j) => j.matchScore)).filter((s) => s != null);
+  const avg = scored.length ? Math.round(scored.reduce((a, b) => a + b, 0) / scored.length) : null;
+
+  return (
+    <div className="space-y-8">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatTile label="Searches run" value={history.length} hint="Stored in this browser" />
+        <StatTile label="Roles matched" value={totalRoles.toLocaleString()} hint="Across all searches" />
+        <StatTile label="Average match" value={avg == null ? '—' : `${avg}%`} hint={avg == null ? 'No AI scores yet' : 'AI-scored postings'} />
+        <StatTile label="Estimated spend" value={`$${spend.toFixed(2)}`} hint="Apify credits, local estimate" />
+      </div>
+
+      <div>
+        <SectionHead title="Recent searches" description="Your last runs, kept locally in this browser."
+                     aside={<Button variant="primary" size="sm" onClick={() => go('new')}><Sparkles size={13} aria-hidden /> New search</Button>} />
+        {history.length === 0 ? (
+          <EmptyState Icon={History} title="No searches yet" body="Run your first search to see it here." />
+        ) : (
+          <Card className="overflow-hidden">
+            <ul className="divide-y divide-line-subtle">
+              {history.slice(0, 5).map((h) => (
+                <li key={h.id}>
+                  <button onClick={() => go('searches')}
+                          className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-hover ${ring}`}>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-h3 font-medium text-fg">{h.title}</p>
+                      <p className="mt-0.5 text-sm text-fg-muted">{h.location} · {h.sources.join(' + ')} · {timeAgo(h.at)}</p>
+                    </div>
+                    <span className="shrink-0 text-sm tabular-nums text-fg-muted">{h.count} roles</span>
+                    <ArrowRight size={14} aria-hidden className="shrink-0 text-fg-muted" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
       </div>
     </div>
-    <div class="table-scroll">
-      <table>
-        <thead><tr id="thead"></tr></thead>
-        <tbody id="tbody"></tbody>
-      </table>
+  );
+}
+
+function Searches({ history, onOpen, onClear }) {
+  if (!history.length) return <EmptyState Icon={History} title="No search history" body="Searches you run are saved in this browser." />;
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between border-b border-line-subtle px-4 py-2.5">
+        <h3 className="text-sm font-semibold text-fg">{history.length} searches</h3>
+        <Button size="sm" variant="danger" onClick={onClear}><Trash2 size={13} aria-hidden /> Clear history</Button>
+      </div>
+      <ul className="divide-y divide-line-subtle">
+        {history.map((h) => (
+          <li key={h.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-h3 font-medium text-fg">{h.title}</p>
+              <p className="mt-0.5 text-sm text-fg-muted">{h.location} · {h.sources.join(' + ')} · {h.count} roles · {timeAgo(h.at)}</p>
+            </div>
+            <Button size="sm" onClick={() => onOpen(h)}>Open results</Button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/* ═══════════════════════ app ═══════════════════════ */
+
+function App() {
+  const [theme, setThemeState] = useState(() => document.documentElement.getAttribute('data-theme') || 'light');
+  const [view, setView] = useState('new');
+  const [drawer, setDrawer] = useState(false);
+
+  const [jd, setJd] = useState('');
+  const [limit, setLimit] = useState(MIN_LIMIT);
+  const [sources, setSources] = useState(['linkedin', 'indeed']);
+  const [useAi, setUseAi] = useState(true);
+
+  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState('Searching candidates…');
+  const [jobs, setJobs] = useState([]);
+  const [params, setParams] = useState(null);
+  const [jdError, setJdError] = useState('');
+
+  const [attached, setAttached] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  const [model, setModel] = useState('deepseek/deepseek-v4-pro');
+  const [toasts, setToasts] = useState([]);
+  const [history, setHistory] = useState(() => store.get('ha.history', []));
+  const [saved, setSaved] = useState(() => store.get('ha.saved', []));
+
+  const pipelineRef = useRef(null);
+
+  const savedKeys = useMemo(() => new Set(saved.map(jobKey)), [saved]);
+  const cost = (limit * Math.max(sources.length, 1) * COST_PER_JOB).toFixed(2);
+  const spend = useMemo(() => history.reduce((n, h) => n + (h.cost || 0), 0), [history]);
+  const skills = params?.mustHaveSkills || [];
+  const creditsLeft = PLAN_BUDGET - spend;
+
+  const setTheme = useCallback((mode) => {
+    setThemeState(mode);
+    document.documentElement.setAttribute('data-theme', mode);
+    store.set('ha.theme', mode);
+  }, []);
+
+  // user ne explicitly choose nahi kiya to OS ke saath chalte raho
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = (e) => {
+      if (store.get('ha.theme', null)) return;
+      const mode = e.matches ? 'dark' : 'light';
+      setThemeState(mode);
+      document.documentElement.setAttribute('data-theme', mode);
+    };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const toast = useCallback((type, title, body) => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t, { id, type, title, body }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500);
+  }, []);
+  const dismiss = useCallback((id) => setToasts((t) => t.filter((x) => x.id !== id)), []);
+
+  useEffect(() => store.set('ha.saved', saved), [saved]);
+  useEffect(() => store.set('ha.history', history), [history]);
+
+  useEffect(() => {
+    fetch('/api/health').then((r) => r.json()).then((h) => {
+      setModel(h.model);
+      const missing = [];
+      if (!h.apifyKey) missing.push('APIFY_API_KEY');
+      if (!h.openRouterKey) missing.push('OPENROUTER_API_KEY');
+      if (missing.length) toast('error', 'Missing API keys', `${missing.join(' and ')} not found in .env — searches will fail.`);
+    }).catch(() => {});
+  }, [toast]);
+
+  const uploadFile = useCallback(async (file) => {
+    setUploading(true);
+    setJdError('');
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch('/api/extract', { method: 'POST', body });
+      const data = await res.json();
+      if (!res.ok) { toast('error', 'Unable to parse document', data.error || 'Unsupported or unreadable file.'); return; }
+      setJd(data.text);
+      setAttached({ name: data.filename, size: file.size, words: data.words });
+      toast('success', 'Document parsed', `${data.words.toLocaleString()} words extracted locally — no tokens used.`);
+    } catch (e) {
+      toast('error', 'Upload failed', e.message);
+    } finally {
+      setUploading(false);
+    }
+  }, [toast]);
+
+  const toggleSource = (id) => setSources((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  const toggleSave = (job) => {
+    const k = jobKey(job);
+    setSaved((prev) => {
+      if (prev.some((j) => jobKey(j) === k)) { toast('info', 'Removed from saved'); return prev.filter((j) => jobKey(j) !== k); }
+      toast('success', 'Saved to shortlist', job.title);
+      return [{ ...job, description: undefined }, ...prev];
+    });
+  };
+
+  const exportCsv = (list) => {
+    const cols = ['matchScore', 'matchReason', 'source', 'title', 'company', 'location',
+      'contractType', 'experienceLevel', 'salary', 'postedAt', 'url'];
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""').replace(/\s+/g, ' ').trim()}"`;
+    const csv = [cols.join(','), ...list.map((j) => cols.map((c) => esc(j[c])).join(','))].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `hiring-agent-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('success', 'CSV exported', `${list.length} rows downloaded.`);
+  };
+
+  const run = async () => {
+    const jobDescription = jd.trim();
+    if (jobDescription.length < 20) {
+      setJdError('Add at least 20 characters of job description — paste one or upload a document.');
+      setView('new');
+      return;
+    }
+    if (sources.length === 0) { toast('error', 'No sources selected', 'Pick at least one job source to search.'); return; }
+
+    setJdError('');
+    setBusy(true);
+    setStage('Searching candidates…');
+    setJobs([]);
+    setParams(null);
+    setTimeout(() => pipelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+
+    const apiSource = sources.length === 2 ? 'both' : sources[0];
+
+    try {
+      const res = await fetch('/api/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobDescription, limit, source: apiSource, useAi }),
+      });
+
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        toast('error', 'Search failed', e.error || e.detail || `Request failed (${res.status})`);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const ev = JSON.parse(line);
+
+          if (ev.type === 'progress') {
+            // stage text asli stream stages se aata hai, timer se nahi
+            if (ev.stage === 'parse') setStage('Analyzing job description…');
+            else if (ev.stage === 'score') setStage('Ranking candidates…');
+            else setStage('Searching candidates…');
+            if (ev.isError) toast('warning', 'Pipeline warning', ev.message);
+          } else if (ev.type === 'params') {
+            setParams(ev.params);
+          } else if (ev.type === 'error') {
+            toast('error', 'Search failed', ev.message);
+          } else if (ev.type === 'done') {
+            setJobs(ev.jobs);
+            setParams(ev.params || null);
+            setHistory((h) => [{
+              id: Date.now(),
+              at: new Date().toISOString(),
+              title: ev.params?.title || 'Search',
+              location: `${ev.params?.location || '—'} (${ev.params?.country || '—'})`,
+              sources: sources.map((s) => SOURCES.find((x) => x.id === s).label),
+              count: ev.jobs.length,
+              cost: +(limit * sources.length * COST_PER_JOB).toFixed(4),
+              skills: ev.params?.mustHaveSkills || [],
+              // description lambi hoti hai — localStorage bharne se bachate hain
+              jobs: ev.jobs.map(({ description, ...rest }) => rest),
+            }, ...h].slice(0, 10));
+            toast('success', `${ev.jobs.length} roles matched`,
+              useAi ? 'Ranked by fit against your job description.' : 'AI ranking was off — results are unranked.');
+          }
+        }
+      }
+    } catch (e) {
+      toast('error', 'Something went wrong', e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openHistory = (h) => {
+    setJobs(h.jobs);
+    setParams({ title: h.title, mustHaveSkills: h.skills || [] });
+    setView('matches');
+  };
+
+  const titles = {
+    overview: ['Overview', 'Your searches, matches, and usage at a glance.'],
+    new: ['New Candidate Search', 'Find and rank the most relevant candidates from your job description.'],
+    searches: ['Searches', 'Every search you have run in this browser.'],
+    matches: ['Matches', 'The ranked pipeline from your most recent search.'],
+    saved: ['Saved', 'Roles you shortlisted for a closer look.'],
+  };
+  const [pageTitle, pageSub] = titles[view];
+
+  const sidebarProps = { view, setView, savedCount: saved.length, spend };
+
+  return (
+    <div className="flex h-full overflow-hidden bg-app">
+      <aside className="hidden lg:block"><Sidebar {...sidebarProps} /></aside>
+
+      {drawer && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div className="absolute inset-0 bg-overlay" onClick={() => setDrawer(false)} aria-hidden />
+          <div className="fade-up absolute left-0 top-0 h-full shadow-lg">
+            <Sidebar {...sidebarProps} onNavigate={() => setDrawer(false)} />
+          </div>
+        </div>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="themed flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-6">
+          <button onClick={() => setDrawer(true)} aria-label="Open navigation"
+                  className={`-ml-1 rounded-md p-2 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg lg:hidden ${ring}`}>
+            <Menu size={17} />
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-h1 font-semibold text-fg">{pageTitle}</h1>
+            <p className="hidden truncate text-sm text-fg-sec sm:block">{pageSub}</p>
+          </div>
+
+          {/* model + credits secondary controls hain — borderless aur muted,
+              taaki page title se compete na karein */}
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="hidden items-center gap-1.5 text-xs font-medium text-fg-muted md:inline-flex">
+              <Sparkles size={12} aria-hidden /> {model}
+            </span>
+            <span className={`hidden items-center gap-1.5 text-xs font-medium sm:inline-flex ${
+              creditsLeft < 1 ? 'rounded-md border border-warning-border bg-warning-subtle px-2 py-1 text-warning-text' : 'text-fg-muted'
+            }`}>
+              {creditsLeft < 1 && <AlertTriangle size={11} aria-hidden />}
+              <span className="tabular-nums">${creditsLeft.toFixed(2)}</span> credits
+            </span>
+            <ThemeSwitch theme={theme} setTheme={setTheme} />
+            <div aria-hidden className="grid h-8 w-8 place-items-center rounded-full border border-line bg-surface-hover text-xs font-semibold text-fg-sec" title="Anshu">A</div>
+          </div>
+        </header>
+
+        <main className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-[1280px] px-4 py-5 sm:px-6 sm:py-6">
+
+            {view === 'new' && (
+              <div className="space-y-6">
+                <JdSection jd={jd} setJd={setJd} attached={attached} setAttached={setAttached}
+                           uploading={uploading} uploadFile={uploadFile} error={jdError} />
+                <ConfigSection limit={limit} setLimit={setLimit} sources={sources} toggleSource={toggleSource}
+                               useAi={useAi} setUseAi={setUseAi} cost={cost} busy={busy} stage={stage} onRun={run} />
+                <section ref={pipelineRef} aria-labelledby="pipe-head" className="scroll-mt-6">
+                  <SectionHead step="3" title={<span id="pipe-head">Candidate pipeline</span>}
+                               description={jobs.length ? 'Ranked by how closely each posting matches your JD.' : 'Results land here once the search finishes.'} />
+                  <Pipeline jobs={jobs} skills={skills} busy={busy} stage={stage}
+                            savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)} />
+                </section>
+              </div>
+            )}
+
+            {view === 'overview' && <Overview history={history} spend={spend} go={setView} />}
+            {view === 'searches' && <Searches history={history} onOpen={openHistory} onClear={() => { setHistory([]); toast('info', 'History cleared'); }} />}
+            {view === 'matches' && (
+              <Pipeline jobs={jobs} skills={skills} busy={busy} stage={stage}
+                        savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)} />
+            )}
+            {view === 'saved' && (
+              saved.length === 0
+                ? <EmptyState Icon={Bookmark} title="Nothing saved yet" body="Use Save on any result to shortlist it here." />
+                : (
+                  <Card className="overflow-hidden">
+                    <div className="border-b border-line-subtle px-4 py-2.5">
+                      <h3 className="text-sm font-semibold text-fg">{saved.length} saved</h3>
+                    </div>
+                    <ul className="divide-y divide-line-subtle">
+                      {saved.map((j) => <JobRow key={jobKey(j)} job={j} skills={skills} saved onSave={toggleSave} />)}
+                    </ul>
+                  </Card>
+                )
+            )}
+          </div>
+        </main>
+      </div>
+
+      <Toasts items={toasts} dismiss={dismiss} />
     </div>
-  </div>
+  );
+}
 
-</div>
-
-<script src="app.js"></script>
+createRoot(document.getElementById('root')).render(<App />);
+</script>
 </body>
 </html>

@@ -41,7 +41,7 @@ async def _chat(messages: list[dict], api_key: str, temperature: float = 0.2) ->
     except (KeyError, IndexError):
         content = None
     if not content:
-        raise RuntimeError("OpenRouter ne khaali response bheja")
+        raise RuntimeError("OpenRouter returned an empty response")
 
     # Model kabhi kabhi JSON ko ```json fence me wrap kar deta hai.
     cleaned = _FENCE_END.sub("", _FENCE_START.sub("", content.strip()))
@@ -151,7 +151,7 @@ async def score_jobs(
             usage_total["completion_tokens"] += usage.get("completion_tokens") or 0
         except Exception as err:  # ek batch fail ho to baaki chalte rahein
             if on_progress:
-                await on_progress("score", f"Batch {batch_no + 1} score nahi ho paya: {err}", True)
+                await on_progress("score", f"Batch {batch_no + 1} could not be scored: {err}", True)
 
         done += 1
         if on_progress:

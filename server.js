@@ -19,13 +19,13 @@ app.post('/api/search', async (req, res) => {
     const { jobDescription, limit, source = 'both', useAi = true } = req.body || {};
 
     if (!jobDescription || jobDescription.trim().length < 20) {
-        return res.status(400).json({ error: 'Job description kam se kam 20 characters ka hona chahiye' });
+        return res.status(400).json({ error: 'Job description must be at least 20 characters' });
     }
 
     const apifyToken = process.env.APIFY_API_KEY;
     const openRouterKey = process.env.OPENROUTER_API_KEY;
-    if (!apifyToken) return res.status(500).json({ error: 'APIFY_API_KEY .env me nahi mila' });
-    if (useAi && !openRouterKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY .env me nahi mila' });
+    if (!apifyToken) return res.status(500).json({ error: 'APIFY_API_KEY not found in .env' });
+    if (useAi && !openRouterKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY not found in .env' });
 
     const cappedLimit = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Number(limit) || MIN_LIMIT));
 
@@ -39,10 +39,10 @@ app.post('/api/search', async (req, res) => {
         let params = { title: null, location: 'India', country: 'IN', summary: '', mustHaveSkills: [] };
 
         if (useAi) {
-            progress('parse', `${MODEL_ID} job description padh raha hai...`);
+            progress('parse', `${MODEL_ID} is reading the job description...`);
             const extracted = await extractSearchParams(jobDescription, openRouterKey);
             params = extracted.params;
-            progress('parse', `Search banaya: "${params.title}" in ${params.location} (${params.country})`);
+            progress('parse', `Search built: "${params.title}" in ${params.location} (${params.country})`);
         } else {
             // AI off ho to JD ki pehli line ko hi search keyword maan lete hain.
             params.title = jobDescription.trim().split('\n')[0].slice(0, 60);
@@ -51,7 +51,7 @@ app.post('/api/search', async (req, res) => {
 
         send({ type: 'params', params, limit: cappedLimit });
 
-        progress('scrape', `Apify chal raha hai (max ${cappedLimit} jobs per source)...`);
+        progress('scrape', `Apify is running (max ${cappedLimit} jobs per source)...`);
         let jobs = await scrapeJobs({
             title: params.title,
             location: params.location,
@@ -61,11 +61,11 @@ app.post('/api/search', async (req, res) => {
             token: apifyToken,
         }, progress);
 
-        progress('scrape', `Total ${jobs.length} unique jobs mile`);
+        progress('scrape', `Found ${jobs.length} unique jobs in total`);
 
         let usage = null;
         if (useAi && jobs.length) {
-            progress('score', `${jobs.length} jobs ko JD ke against match kar raha hoon...`);
+            progress('score', `Matching ${jobs.length} jobs against the JD...`);
             const scored = await scoreJobs(jobDescription, jobs, openRouterKey, {}, progress);
             jobs = scored.jobs;
             usage = scored.usage;

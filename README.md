@@ -2,7 +2,7 @@
 
 Job description daalo (ya PDF upload karo) → AI usse search query banata hai → LinkedIn + Indeed scrape hote hain → har job ko JD ke against 0-100 match score milta hai → sorted table.
 
-Backend **FastAPI (Python)**, frontend plain **HTML + CSS + JS** (koi build step nahi).
+Backend **FastAPI (Python)**, frontend **React + Tailwind + Lucide** — sab CDN se aata hai, **koi build step nahi** (na npm install, na bundler). Poora UI ek hi file `public/index.html` me hai.
 
 ---
 
@@ -64,9 +64,7 @@ uvicorn app.main:app --reload --port 3000
 | `app/apify.py` | Dono scrapers chalata hai, output normalize karta hai, duplicates hatata hai |
 | `app/docs.py` | markitdown wrapper — PDF/DOCX se text nikaalta hai (local, koi LLM call nahi) |
 | `app/config.py` | `.env` load, limits, allowed file types |
-| `public/index.html` | UI markup |
-| `public/styles.css` | Poora dark theme |
-| `public/app.js` | Tabs, file upload, NDJSON stream padhna, table sort/filter/CSV |
+| `public/index.html` | **Poora frontend** — React app (single-file), Tailwind theme, JD attach bar, NDJSON stream, table sort/filter/CSV |
 | `scrape-jobs.js` | Purana Node CLI — sirf scraping ke liye, abhi bhi chalta hai |
 
 **Note:** `server.js` purana Express backend hai. Ab use karne ki zaroorat nahi — naya UI `/api/extract` aur `/api/health` use karta hai jo usme nahi hain, isliye `npm start` par PDF upload kaam nahi karega. `python run.py` hi chalao.
@@ -94,27 +92,101 @@ uvicorn app.main:app --reload --port 3000
 
 ## PDF / DOCX upload (markitdown)
 
-UI me **"PDF / DOCX upload"** tab hai — file drop karo ya click karke chuno.
+Alag upload tab nahi hai — JD input ke **neeche hi ek attach bar** hai ("Drop JD file (PDF, DOCX) or click to browse"). Click karke file chuno, ya file ko seedha JD box par drop kar do.
 
 - Backend `markitdown` se text nikaalta hai — **poora local**, koi API call nahi, koi token cost nahi. Isiliye Gemini/GPT se PDF padhwane wala jugaad nahi kiya.
 - Support: `.pdf` `.docx` `.doc` `.pptx` `.txt` `.md` `.html` `.htm` `.rtf` — max **10 MB**
-- Nikla hua text seedha JD box me chala jaata hai, upload ke neeche preview bhi dikhta hai. "Text edit karo" pe click karke paste tab me jaake usme changes kar sakte ho — search wahi final text use karti hai.
+- Nikla hua text seedha JD box me bhar jaata hai, wahin edit bhi kar sakte ho — search wahi final text use karti hai. Attach bar me file name + chars/words dikhta hai, "✕" se saaf ho jaata hai.
 - **Scanned PDF (sirf images) me text nahi milega** — markitdown OCR nahi karta, aisi file par saaf error dikhega.
 
 markitdown blocking library hai, isliye use `asyncio.to_thread` me chalate hain taaki bada PDF server ko block na kare.
 
 ---
 
+## Design system
+
+Saare colors **CSS custom properties** hain, `public/index.html` ke `<style>` block me — ek `:root[data-theme='light']` aur ek `:root[data-theme='dark']`. Tailwind ki har color utility inhi tokens par map hoti hai (`bg-surface`, `text-fg-muted`, `border-line`, `bg-brand-subtle`...), isliye component me koi raw hex nahi hai aur theme badalne par kuch peeche nahi chhootta.
+
+**Brand: deep indigo** (`#4F46E5` light / `#818CF8` dark), electric-blue family ke saath. Indigo sirf in jagah reserved hai: primary CTA, active navigation, focus states, selected states, aur section indicators. Baaki UI neutral slate par chalti hai — product colorful nahi, **contrast-driven** hai.
+
+Token groups: backgrounds (`--bg-app`, `--bg-sidebar`, `--surface`, `--surface-elev`, `--surface-hover`, `--surface-sunken`, `--surface-selected`, `--input-bg`), borders (`--border-subtle/-/-strong/-control`), text (`--text-primary/secondary/muted/disabled/inverse`), brand (5 shades + `--brand-on`), semantic (success/warning/error/info × default/subtle/border/text), focus, elevation.
+
+### Contrast
+
+WCAG 2.2 AA ko engineering requirement ki tarah treat kiya hai — **66 pairs measure kiye gaye hain**, guess nahi. Notable:
+
+| Pair | Light | Dark |
+|---|---|---|
+| Muted text on surface | 4.76:1 | 6.92:1 |
+| Muted text on app bg | 4.55:1 | 7.34:1 |
+| CTA label on brand button | 6.29:1 | 6.31:1 |
+| Active nav text on selected surface | 7.07:1 | 8.02:1 |
+| Error text on error-subtle | 5.91:1 | 9.09:1 |
+| Control boundary vs surface (UI, 3:1) | 4.76:1 | 6.92:1 |
+
+Do jagah palette ko accessibility ke liye split karna pada:
+
+- **`--border-strong` vs `--border-control`.** `#CBD5E1` decorative borders ke liye theek hai par toggle-off aur unchecked checkbox ka wahi ek visual boundary hai — `#CBD5E1` sirf 1.5:1 deta hai. Un control boundaries ke liye alag `--border-control` (`#64748B`) hai jo 4.76:1 deta hai.
+- **Semantic base vs text.** `#059669` / `#D97706` indicators ke liye theek hain (3:1 chahiye) par normal text ke liye fail karte hain. Isliye har semantic ka ek `-text` variant hai (`#047857` / `#B45309`) jo 4.5:1 clear karta hai.
+
+**Ek combo banned hai:** muted text on selected surface. Selected surfaces sirf `brand-text` ya `secondary` text carry karte hain — validator yahi rule assert karta hai.
+
+### Structure borders se aati hai, luminance se nahi
+
+Ye ek galti thi jo theek karni padi. Jab UI "flat" lag rahi thi, pehle cards ko background se **lighter** kar diya gaya — nateeja ye hua ki cards bade gray-navy slabs ban gaye aur aur bura lagne laga.
+
+Sahi tareeka wo hai jo Linear/Vercel use karte hain: canvas near-black rakho, cards sirf halka sa upar, aur separation **border** se do. Validator ke thresholds bhi isi hisaab se badle — surface jump ka minimum kam, border ka minimum zyada:
+
+| Check | Dark | Light |
+|---|---|---|
+| Card lifts off app bg | 1.11:1 (min 1.05) | 1.04:1 |
+| Border reads on card | **1.83:1** (min 1.75) | 1.30:1 |
+| Border reads on app bg | **2.04:1** | 1.25:1 |
+
+Palette navy se hoti hui **warm cream / stone** par pahunchi — pehle cold blue-gray tha jo sakht lagta tha. Light theme cream (`#F7F4EF` canvas, white cards), dark theme warm charcoal (`#0B0A09` / `#1A1815`). Shadows bhi warm hain (`rgba(41,33,24,…)`) — cream ke upar neutral gray shadow ganda lagta hai. Rang sirf accent ke liye bacha hai.
+
+**Meaning kabhi sirf rang se nahi jaati:** toggle ke knob me check/cross icon hai + bagal me "On"/"Off" text; score ke saath hamesha band label ("Strong match"); har toast me icon + screen-reader ke liye status word; low credits par warning icon + "Low credits" text.
+
+### Theme toggle
+
+Header me day/night switch (☀ / ☾) — thumb slide karta hai, active side ka symbol highlight hota hai. Pehli baar `prefers-color-scheme` follow karta hai, choose karne par `localStorage` me save ho jaata hai. `<head>` me ek inline script paint se pehle attribute set kar deta hai, isliye flash nahi hota.
+
+**Light tokens bare `:root` par hain**, `[data-theme='light']` par nahi. Dark unhe override karta hai. Iska matlab `data-theme` kabhi missing ya corrupt ho jaaye to bhi page tokenless (colorless) nahi ho sakta — pehle exactly wahi bug tha: `store.set` JSON.stringify karta hai to localStorage me `"dark"` quotes ke saath jaata tha, head script usse raw padh ke `data-theme='"dark"'` set kar deta tha, aur koi selector match na hone se saare colors gayab ho jaate the. Head script ab value ko parse + validate karta hai.
+
+---
+
 ## UI
 
-- **Job Description** — paste karo ya PDF daalo (minimum 20 characters)
-- **Limit slider** — 50 se 200 tak, step 10. Ye *per source* hai, to "both" pe 200 matlab ~400 jobs
-- **Sources** — LinkedIn + Indeed / sirf LinkedIn / sirf Indeed
-- **AI Matching toggle** — off karoge to scraping to hogi par score nahi milega (aur OpenRouter cost bhi nahi lagega)
-- **Live log** — poore run me 1.5-3 minute lagte hain (scraping ~60-75s, phir AI scoring), isliye har step ka update live dikhta hai
-- **Startup par keys check** — `.env` me koi key missing ho to page khulte hi log me red warning aa jaati hai
-- **Table** — match score + reason, source badge, clickable job title, company, location, type, level, salary, posted date
-- Column header pe click karke sort, filter box, aur CSV download
+SaaS app shell hai — left sidebar + top header + scrollable content. Main workflow ek hi page par 3 numbered steps me hai: **JD → configuration → pipeline**.
+
+### New Search (main workflow)
+
+- **Step 1 — Job Description** — bada textarea. Paste karo, ya neeche wali bar se PDF/DOCX upload karo / seedha drop kar do (minimum 20 characters). File lagne par compact chip dikhta hai: icon + filename + size + words + remove
+- **"Load sample JD"** — ek click me demo JD, testing ke liye
+- **Step 2 — Search configuration** — teen controls:
+  - *Jobs to find*: `−  10  +` stepper (10–30, step 5, per source), neeche live `Estimated search cost: ~$0.05`
+  - *Job sources*: multi-select dropdown, selected sources chips ki tarah dikhte hain. **Glassdoor aur Wellfound disabled ("Soon") hain** — backend abhi sirf LinkedIn + Indeed support karta hai
+  - *AI scoring & ranking*: toggle. Off karoge to scraping hogi par score nahi milega (OpenRouter cost bhi nahi)
+- **CTA "✨ Find candidates"** — ek hi primary button. Chalte waqt label asli stream stages follow karta hai: *Reading job description… → Searching candidates… → Ranking results…*
+- **Step 3 — Candidate pipeline** — chalte waqt skeleton rows, phir ranked list. Har row me: match % + band label ("Strong match") + progress bar, role title, source badge, company/location/type/level/salary/posted, **matched skill tags**, AI summary, aur Save + View posting buttons
+- Pipeline controls: search box, sort (relevance / recent / company / role), source filter, score filter, CSV export
+
+### Baaki views (sidebar)
+
+Ye sab **localStorage** par chalte hain, koi extra backend nahi:
+
+| View | Kya dikhata hai |
+|---|---|
+| Overview | Stat tiles (searches run, roles matched, average match, estimated spend) + recent searches |
+| Searches | Purani runs (last 10). "Open results" se wo pipeline wapas khul jaata hai |
+| Matches | Aakhri search ka poora pipeline |
+| Saved | Jo roles shortlist kiye |
+
+- **Matched skill tags** LLM se nahi aate — backend per-job skills deta hi nahi. Ye client side derive hote hain: `params.mustHaveSkills` me se wahi dikhte hain jo posting ke title/description me actually milte hain
+- **Credits indicator** local estimate hai (`jobs × $0.0026` jod ke), asli Apify balance nahi
+- **Toasts** — file parse, save, CSV export, aur har error ke liye
+- **Startup par keys check** — `.env` me key missing ho to red toast aata hai
+- Responsive: tablet/mobile par sidebar drawer ban jaata hai, config controls stack ho jaate hain, CTA full width
 
 ---
 
@@ -205,6 +277,8 @@ curl -s "https://api.apify.com/v2/users/me/limits?token=$APIFY_API_KEY"
   ```powershell
   Get-NetTCPConnection -LocalPort 3000 -State Listen
   ```
+- **Frontend ko pehli baar load karne me internet chahiye.** React, Tailwind, Babel, Lucide aur Inter font CDN se aate hain (unpkg + esm.sh + Google Fonts) — build step bachane ke liye. Browser inhe cache kar leta hai, par bilkul offline chalana ho to ye files `public/vendor/` me download karke `index.html` me paths badal dena.
+- Tailwind ka Play CDN console me "should not be used in production" warning deta hai — local tool ke liye ye expected hai, ignore kar do.
 - `.env` `.gitignore` me hai — commit mat karna.
 
 ### Scoring thodi strict hai

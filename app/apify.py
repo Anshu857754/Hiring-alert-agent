@@ -66,17 +66,17 @@ async def scrape_jobs(
             await on_progress(stage, message, is_error)
 
     async def run_one(actor_id: str, run_input: dict, label: str, normalize) -> list[dict]:
-        await progress(label, f"{label} scraper start ho raha hai...")
+        await progress(label, f"Starting the {label} scraper...")
         try:
             run = await client.actor(actor_id).call(run_input=run_input)
             if run is None or not run.default_dataset_id:
-                raise RuntimeError("Apify run ka dataset nahi mila (run fail hua ya timeout)")
+                raise RuntimeError("No dataset returned by the Apify run (it failed or timed out)")
             page = await client.dataset(run.default_dataset_id).list_items()
             items = page.items
-            await progress(label, f"{label} se {len(items)} jobs mile")
+            await progress(label, f"Got {len(items)} jobs from {label}")
             return [normalize(item) for item in items]
         except Exception as err:  # ek source fail ho to dusri ka data phir bhi dikhao
-            await progress(label, f"{label} fail hua: {err}", True)
+            await progress(label, f"{label} failed: {err}", True)
             return []
 
     tasks = []
