@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from . import config, docs
 from .apify import scrape_jobs
-from .llm import MODEL_ID, extract_search_params, score_jobs
+from .llm import MODEL_ID, build_learning_plan, extract_search_params, score_jobs
 
 app = FastAPI(title="Hiring Agent", version="2.0.0")
 
@@ -20,7 +20,14 @@ class SearchRequest(BaseModel):
     limit: int = config.MIN_LIMIT
     source: Literal["both", "linkedin", "indeed"] = "both"
     useAi: bool = True
-    batchSize: int = Field(default=15, ge=5, le=30)
+    # Chhote batches parallel me chalte hain, to wall-clock time sabse dheeme
+    # single call se bandha hota hai — 10 par wo call 15 se choti hoti hai.
+    batchSize: int = Field(default=10, ge=5, le=30)
+
+
+class RecommendRequest(BaseModel):
+    profile: str = ""
+    jobs: list[dict] = Field(default_factory=list)
 
 
 @app.get("/api/health")
@@ -58,6 +65,26 @@ async def extract(file: UploadFile = File(...)) -> JSONResponse:
         )
 
     return JSONResponse({**result, "filename": file.filename})
+
+
+@app.post("/api/recommend")
+async def recommend(req: RecommendRequest) -> JSONResponse:
+    """Scored postings ke gaps se 15/30 din ka upskilling plan banata hai."""
+    profile = (req.profile or "").strip()
+
+    if len(profile) < 20:
+        return JSONResponse({"error": "Add your resume or profile first (at least 20 characters)"}, status_code=400)
+    if not req.jobs:
+        return JSONResponse({"error": "Run a search first — there are no postings to analyse"}, status_code=400)
+    if not config.OPENROUTER_API_KEY:
+        return JSONResponse({"error": "OPENROUTER_API_KEY not found in .env"}, status_code=500)
+
+    try:
+        result = await build_learning_plan(profile, req.jobs, config.OPENROUTER_API_KEY)
+    except Exception as err:
+        return JSONResponse({"error": f"Could not build a plan: {err}"}, status_code=502)
+
+    return JSONResponse({**result, "model": MODEL_ID})
 
 
 @app.post("/api/search")
@@ -117,6 +144,11 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
                 on_progress=progress,
             )
             await progress("scrape", f"Found {len(jobs)} unique jobs in total")
+
+            # Scoring me ~30s lagte hain. Table ko tab tak khaali rakhne ke bajaye
+            # unscored jobs turant bhej dete hain — UI bharti hai, scores baad me aate hain.
+            if req.useAi and jobs:
+                await send({"type": "partial", "jobs": jobs, "params": params})
 
             usage = None
             if req.useAi and jobs:

@@ -256,9 +256,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'https:
 import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
 import {
   AlertTriangle, ArrowRight, Bookmark, BookmarkCheck, Building2, Check, CheckCircle2,
-  ChevronDown, Clock, Download, ExternalLink, FileText, History, Info, LayoutGrid, Loader2,
-  MapPin, Menu, Minus, Moon, Paperclip, Plus, Search, Settings, Sparkles, Sun, Trash2,
-  Users, X, XCircle,
+  ChevronDown, Clock, Download, ExternalLink, FileText, GraduationCap, History, Info,
+  LayoutGrid, Loader2, MapPin, Menu, Minus, Moon, Paperclip, Plus, Search, Settings,
+  Sparkles, Sun, Target, Trash2, TrendingUp, Users, X, XCircle,
 } from 'https://esm.sh/lucide-react@0.462.0?deps=react@18.3.1';
 
 /* ═══════════════════════ constants ═══════════════════════ */
@@ -433,10 +433,12 @@ function InlineStatus({ type = 'error', children }) {
   );
 }
 
-function Toasts({ items, dismiss }) {
+function Toasts({ items, dismiss, raised }) {
   return (
     <div role="status" aria-live="polite"
-         className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+         className={`pointer-events-none fixed right-5 z-40 flex w-80 max-w-[calc(100vw-2.5rem)] flex-col gap-2 transition-[bottom] duration-200 ${
+           raised ? 'bottom-[76px]' : 'bottom-5'
+         }`}>
       {items.map((t) => {
         const { Icon, word, cls } = STATUS[t.type] || STATUS.info;
         return (
@@ -702,7 +704,7 @@ function SourcePicker({ selected, toggle, invalid }) {
    taaki teeno columns ki lines aapas me align rahein. */
 function Setting({ label, hint, htmlFor, children, status }) {
   return (
-    <div className="flex flex-col px-4 py-4">
+    <div className="flex flex-col bg-surface px-4 py-4">
       <label htmlFor={htmlFor} className="block text-h3 font-semibold text-fg">{label}</label>
       <p className="mt-1 min-h-[36px] text-sm text-fg-muted">{hint}</p>
       <div className="mt-1 flex min-h-[32px] items-center gap-3">{children}</div>
@@ -711,18 +713,20 @@ function Setting({ label, hint, htmlFor, children, status }) {
   );
 }
 
-function ConfigSection({ limit, setLimit, sources, toggleSource, useAi, setUseAi, cost, busy, stage, onRun }) {
+function ConfigSection({ limit, setLimit, sources, toggleSource, useAi, setUseAi,
+                        recommend, setRecommend, cost, busy, stage, onRun }) {
   return (
     <section aria-labelledby="cfg-head">
       <SectionHead step="2" title={<span id="cfg-head">Search configuration</span>}
                    description="Choose how wide to search and whether the AI should rank what it finds." />
 
-      <Card>
-        <div className="divide-y divide-line-subtle lg:grid lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+      <Card className="overflow-hidden">
+        {/* gap-px + cell background = har breakpoint par saaf 1px dividers */}
+        <div className="grid grid-cols-1 gap-px bg-line-subtle sm:grid-cols-2 lg:grid-cols-4">
 
           <Setting
             label="Jobs to find" htmlFor="limit"
-            hint={`How many postings to pull from each source (${MIN_LIMIT}–${MAX_LIMIT}).`}
+            hint={`Postings pulled from each source (${MIN_LIMIT}–${MAX_LIMIT}).`}
             status={<span className="text-fg-muted">Est. cost <span className="font-medium tabular-nums text-fg-sec">~${cost}</span></span>}
           >
               <div className="flex h-8 items-center rounded-md border border-line bg-input shadow-sm">
@@ -744,7 +748,7 @@ function ConfigSection({ limit, setLimit, sources, toggleSource, useAi, setUseAi
 
           <Setting
             label="Job sources"
-            hint="Which job boards the postings are scraped from."
+            hint="Which job boards to scrape from."
             status={sources.length === 0
               ? <span className="flex items-center gap-1.5 text-error-text"><AlertTriangle size={12} aria-hidden /> Pick at least one source.</span>
               : <span className="text-fg-muted">{sources.length} selected · ~{limit * sources.length} postings</span>}
@@ -754,16 +758,33 @@ function ConfigSection({ limit, setLimit, sources, toggleSource, useAi, setUseAi
 
           <Setting
             label="AI scoring &amp; ranking" htmlFor="ai"
-            hint="Evaluate and rank every posting against the requirements."
+            hint="Score and rank every posting found."
             /* status brand color me hai, green me nahi — ye product ka primary
                control hai, success message nahi */
             status={<span id="ai-state" className="text-fg-muted">
-              {useAi ? '— adds ~30s and OpenRouter tokens' : '— scraping only, no scores'}
+              {useAi ? '— adds ~30s and tokens' : '— scraping only, no scores'}
             </span>}
           >
             <Toggle id="ai" on={useAi} onChange={setUseAi} describedBy="ai-state" />
             <span className="flex items-center gap-1.5 text-sm">
               {useAi
+                ? <><Check size={13} strokeWidth={3} aria-hidden className="text-brand-text" /><span className="font-semibold text-brand-text">Enabled</span></>
+                : <><X size={13} strokeWidth={3} aria-hidden className="text-fg-muted" /><span className="font-semibold text-fg-sec">Disabled</span></>}
+            </span>
+          </Setting>
+
+          {/* Default OFF — user chaahe to on kare. Scoring ke bina koi gap
+              nikal hi nahi sakta, isliye AI off hone par ye bhi disabled. */}
+          <Setting
+            label="Career recommendations" htmlFor="rec"
+            hint="Turn near-misses into a study plan."
+            status={<span id="rec-state" className="text-fg-muted">
+              {!useAi ? '— needs AI scoring on' : recommend ? '— plan offered with results' : '— off'}
+            </span>}
+          >
+            <Toggle id="rec" on={recommend && useAi} onChange={setRecommend} describedBy="rec-state" disabled={!useAi} />
+            <span className="flex items-center gap-1.5 text-sm">
+              {recommend && useAi
                 ? <><Check size={13} strokeWidth={3} aria-hidden className="text-brand-text" /><span className="font-semibold text-brand-text">Enabled</span></>
                 : <><X size={13} strokeWidth={3} aria-hidden className="text-fg-muted" /><span className="font-semibold text-fg-sec">Disabled</span></>}
             </span>
@@ -866,6 +887,217 @@ function SkeletonRow() {
   );
 }
 
+/* ═══════════════════════ Kai — career coach agent ═══════════════════════ */
+
+const AGENT_NAME = 'Kai';
+
+function Bubble({ children }) {
+  return (
+    <div className="rounded-xl rounded-tl-sm border border-line bg-surface-sunken px-3 py-2.5 text-sm leading-6 text-fg-sec">
+      {children}
+    </div>
+  );
+}
+
+function PlanBody({ plan }) {
+  return (
+    <div className="space-y-4">
+      {plan.summary && <Bubble>{plan.summary}</Bubble>}
+
+      {plan.rationale && (
+        <p className="flex items-start gap-2 rounded-lg border border-info-border bg-info-subtle px-3 py-2 text-sm leading-5 text-info-text">
+          <Info size={13} aria-hidden className="mt-0.5 shrink-0" />
+          <span><span className="font-semibold">Why {plan.planDays} days:</span> {plan.rationale}</span>
+        </p>
+      )}
+
+      {plan.strengths?.length > 0 && (
+        <section>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Already in your favour</h4>
+          <ul className="mt-1.5 flex flex-wrap gap-1">
+            {plan.strengths.map((s) => (
+              <li key={s} className="rounded border border-success-border bg-success-subtle px-1.5 py-0.5 text-xs font-medium text-success-text">{s}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {plan.gaps?.length > 0 && (
+        <section>
+          <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-fg-muted">
+            <Target size={11} aria-hidden /> What is holding you back
+          </h4>
+          <ul className="mt-1.5 space-y-1.5">
+            {plan.gaps.map((g) => (
+              <li key={g.skill} className="text-sm leading-5">
+                <span className="font-semibold text-fg">{g.skill}</span>
+                {g.postings != null && (
+                  <span className="ml-1.5 rounded border border-line bg-surface-hover px-1.5 text-xs tabular-nums text-fg-sec">
+                    {g.postings}
+                  </span>
+                )}
+                <span className="ml-1.5 text-fg-muted">{g.why}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {plan.milestones?.length > 0 && (
+        <section>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">The plan</h4>
+          <ol className="mt-2 space-y-3 border-l border-line pl-4">
+            {plan.milestones.map((m, i) => (
+              <li key={i} className="relative">
+                <span aria-hidden className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-brand ring-4 ring-surface" />
+                <p className="text-xs font-semibold text-brand-text">{m.window}</p>
+                <p className="mt-0.5 text-sm font-semibold leading-5 text-fg">{m.focus}</p>
+                {m.practice && <p className="mt-1 text-sm leading-5 text-fg-sec"><span className="font-medium">Build:</span> {m.practice}</p>}
+                {m.outcome && <p className="mt-0.5 text-sm leading-5 text-fg-muted">{m.outcome}</p>}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {plan.unlocks?.length > 0 && (
+        <section>
+          <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-fg-muted">
+            <TrendingUp size={11} aria-hidden /> Roles this opens up
+          </h4>
+          <ul className="mt-1.5 divide-y divide-line-subtle rounded-lg border border-line">
+            {plan.unlocks.map((u, i) => (
+              <li key={i} className="px-2.5 py-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="min-w-0 truncate text-sm font-semibold text-fg">{u.title}</p>
+                  <span className="shrink-0 text-sm tabular-nums">
+                    <span className="text-fg-muted">{u.currentScore}%</span>
+                    <span aria-hidden className="mx-1 text-fg-muted">→</span>
+                    <span className="font-semibold text-success-text">{u.projectedScore}%</span>
+                  </span>
+                </div>
+                <p className="truncate text-xs text-fg-muted">{u.company}</p>
+                {u.needs?.length > 0 && (
+                  <ul className="mt-1 flex flex-wrap gap-1">
+                    {u.needs.slice(0, 3).map((n) => (
+                      <li key={n} className="rounded border border-brand-border bg-brand-subtle px-1.5 text-xs font-medium text-brand-text">{n}</li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-xs text-fg-muted">Projected scores are estimates, not guarantees.</p>
+        </section>
+      )}
+
+      {plan.notRealistic?.length > 0 && (
+        <section>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Out of reach for now</h4>
+          <ul className="mt-1.5 space-y-1">
+            {plan.notRealistic.map((n, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-sm leading-5 text-fg-muted">
+                <AlertTriangle size={12} aria-hidden className="mt-1 shrink-0 text-warning-text" />{n}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AgentDock({ open, setOpen, plan, loading, error, jobs, onGenerate, onClear }) {
+  const bodyRef = useRef(null);
+  const nearMiss = jobs.filter((j) => j.matchScore != null && j.matchScore >= 40 && j.matchScore < 75).length;
+  const strong = jobs.filter((j) => (j.matchScore ?? 0) >= 75).length;
+
+  useEffect(() => {
+    if (open && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [plan, loading, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, setOpen]);
+
+  return (
+    <>
+      {open && (
+        <div id="agent-panel" role="dialog" aria-label={`${AGENT_NAME}, career coach`}
+             className="fade-up themed fixed bottom-24 right-5 z-50 flex max-h-[min(72vh,640px)] w-[380px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-lg">
+
+          <header className="flex shrink-0 items-center gap-2.5 border-b border-line-subtle bg-surface-sunken px-3 py-2.5">
+            <span aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand text-brand-on">
+              <GraduationCap size={16} />
+            </span>
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="truncate text-sm font-semibold text-fg">{AGENT_NAME}</p>
+              <p className="truncate text-xs text-fg-muted">Career coach</p>
+            </div>
+            {plan && <Button size="sm" variant="ghost" onClick={onClear}>Clear</Button>}
+            <button onClick={() => setOpen(false)} aria-label="Close panel"
+                    className={`rounded-md p-1.5 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg ${ring}`}>
+              <X size={15} />
+            </button>
+          </header>
+
+          <div ref={bodyRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+            <Bubble>
+              I looked at your <b className="font-semibold text-fg">{jobs.length}</b> matches.{' '}
+              {strong > 0 && <><b className="font-semibold text-fg">{strong}</b> already match strongly. </>}
+              {nearMiss > 0
+                ? <>Another <b className="font-semibold text-fg">{nearMiss}</b> are near misses — close enough that a focused plan could reach them.</>
+                : <>There are no near-miss roles here, so there is nothing worth planning for yet.</>}
+            </Bubble>
+
+            {loading && (
+              <div className="flex items-center gap-2 text-sm text-fg-muted">
+                <Loader2 size={14} aria-hidden className="animate-spin text-brand-text" />
+                Reading the gaps and drafting your plan…
+              </div>
+            )}
+
+            {error && <InlineStatus type="error">{error}</InlineStatus>}
+
+            {plan && !loading && <PlanBody plan={plan} />}
+          </div>
+
+          <footer className="shrink-0 border-t border-line-subtle bg-surface-sunken p-3">
+            <Button variant="primary" className="w-full" onClick={onGenerate} disabled={loading || nearMiss === 0}>
+              {loading
+                ? <><Loader2 size={14} aria-hidden className="animate-spin" /> Working…</>
+                : plan ? <>Rebuild the plan</> : <><Sparkles size={14} aria-hidden /> Build my plan</>}
+            </Button>
+            <p className="mt-2 text-center text-xs text-fg-muted">
+              {AGENT_NAME} only suggests skills that appear in these postings.
+            </p>
+          </footer>
+        </div>
+      )}
+
+      {/* corner launcher */}
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open} aria-controls="agent-panel"
+        aria-label={open ? `Close ${AGENT_NAME}` : `Open ${AGENT_NAME}, career coach`}
+        title={`${AGENT_NAME} — career coach`}
+        className={`fixed bottom-5 right-5 z-50 flex h-12 items-center gap-2 rounded-full bg-brand pl-3.5 pr-4 text-brand-on shadow-lg transition-transform hover:scale-[1.03] active:scale-95 ${ring}`}
+      >
+        {open ? <ChevronDown size={18} aria-hidden /> : <GraduationCap size={18} aria-hidden />}
+        <span className="text-sm font-semibold">{AGENT_NAME}</span>
+        {!open && !plan && nearMiss > 0 && (
+          <span className="ml-0.5 grid h-5 min-w-[20px] place-items-center rounded-full bg-brand-on px-1 text-xs font-bold tabular-nums text-brand">
+            {nearMiss}
+          </span>
+        )}
+      </button>
+    </>
+  );
+}
+
 /* ═══════════════════════ pipeline ═══════════════════════ */
 
 function Pipeline({ jobs, skills, busy, stage, savedKeys, onSave, onExport }) {
@@ -891,7 +1123,9 @@ function Pipeline({ jobs, skills, busy, stage, savedKeys, onSave, onExport }) {
     return [...out].sort(by[sort]);
   }, [jobs, q, sort, src, minScore]);
 
-  if (busy) {
+  // Skeletons sirf tab tak jab tak ek bhi job nahi aayi. Jobs aate hi asli
+  // rows dikhte hain aur scoring upar ke bar me chalti rehti hai.
+  if (busy && !jobs.length) {
     return (
       <Card className="overflow-hidden">
         <div className="border-b border-line-subtle px-4 py-3">
@@ -922,6 +1156,16 @@ function Pipeline({ jobs, skills, busy, stage, savedKeys, onSave, onExport }) {
 
   return (
     <Card className="overflow-hidden">
+      {busy && (
+        <div className="border-b border-line-subtle bg-surface-sunken px-4 py-2">
+          <div className="flex items-center gap-2">
+            <Loader2 size={13} aria-hidden className="animate-spin text-brand-text" />
+            <span className="text-sm font-medium text-fg-sec">{stage}</span>
+            <span className="text-sm text-fg-muted">— scores will fill in shortly</span>
+          </div>
+          <div className="progress-indeterminate relative mt-1.5 h-0.5 overflow-hidden rounded-full bg-neutral-subtle" />
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle px-4 py-2.5">
         <h3 className="mr-1 text-sm font-semibold text-fg">
           {rows.length.toLocaleString()} <span className="font-normal text-fg-muted">of {jobs.length} matches</span>
@@ -1054,6 +1298,12 @@ function App() {
   const [limit, setLimit] = useState(MIN_LIMIT);
   const [sources, setSources] = useState(['linkedin', 'indeed']);
   const [useAi, setUseAi] = useState(true);
+  const [recommend, setRecommend] = useState(false);   // default off, jaise maanga tha
+
+  const [plan, setPlan] = useState(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState('');
+  const [agentOpen, setAgentOpen] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState('Searching candidates…');
@@ -1076,6 +1326,7 @@ function App() {
   const spend = useMemo(() => history.reduce((n, h) => n + (h.cost || 0), 0), [history]);
   const skills = params?.mustHaveSkills || [];
   const creditsLeft = PLAN_BUDGET - spend;
+  const showAgent = recommend && useAi && !busy && jobs.length > 0;
 
   const setTheme = useCallback((mode) => {
     setThemeState(mode);
@@ -1173,6 +1424,8 @@ function App() {
     setStage('Searching candidates…');
     setJobs([]);
     setParams(null);
+    setPlan(null);          // naya search = purana plan stale
+    setPlanError('');
     setTimeout(() => pipelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
 
     const apiSource = sources.length === 2 ? 'both' : sources[0];
@@ -1211,6 +1464,10 @@ function App() {
             if (ev.isError) toast('warning', 'Pipeline warning', ev.message);
           } else if (ev.type === 'params') {
             setParams(ev.params);
+          } else if (ev.type === 'partial') {
+            // scraping ho gayi, scoring baaki — table abhi bhar do
+            setJobs(ev.jobs);
+            if (ev.params) setParams(ev.params);
           } else if (ev.type === 'error') {
             toast('error', 'Search failed', ev.message);
           } else if (ev.type === 'done') {
@@ -1237,6 +1494,26 @@ function App() {
       toast('error', 'Something went wrong', e.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const buildPlan = async () => {
+    setPlanLoading(true);
+    setPlanError('');
+    try {
+      const res = await fetch('/api/recommend', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile: jd.trim(), jobs }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setPlanError(data.error || `Request failed (${res.status})`); return; }
+      setPlan(data.plan);
+      setAgentOpen(true);
+      toast('success', `${data.plan.planDays}-day plan ready`, `${data.plan.unlocks?.length || 0} roles could open up.`);
+    } catch (e) {
+      setPlanError(e.message);
+    } finally {
+      setPlanLoading(false);
     }
   };
 
@@ -1307,12 +1584,14 @@ function App() {
                 <JdSection jd={jd} setJd={setJd} attached={attached} setAttached={setAttached}
                            uploading={uploading} uploadFile={uploadFile} error={jdError} />
                 <ConfigSection limit={limit} setLimit={setLimit} sources={sources} toggleSource={toggleSource}
-                               useAi={useAi} setUseAi={setUseAi} cost={cost} busy={busy} stage={stage} onRun={run} />
+                               useAi={useAi} setUseAi={setUseAi} recommend={recommend} setRecommend={setRecommend}
+                               cost={cost} busy={busy} stage={stage} onRun={run} />
                 <section ref={pipelineRef} aria-labelledby="pipe-head" className="scroll-mt-6">
                   <SectionHead step="3" title={<span id="pipe-head">Candidate pipeline</span>}
                                description={jobs.length ? 'Ranked by how closely each posting matches your JD.' : 'Results land here once the search finishes.'} />
                   <Pipeline jobs={jobs} skills={skills} busy={busy} stage={stage}
                             savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)} />
+
                 </section>
               </div>
             )}
@@ -1341,7 +1620,14 @@ function App() {
         </main>
       </div>
 
-      <Toasts items={toasts} dismiss={dismiss} />
+      {/* Kai sirf tab dikhta hai jab recommendations on hon aur results maujood hon */}
+      {showAgent && (
+        <AgentDock open={agentOpen} setOpen={setAgentOpen} plan={plan} loading={planLoading}
+                   error={planError} jobs={jobs} onGenerate={buildPlan}
+                   onClear={() => { setPlan(null); setPlanError(''); }} />
+      )}
+
+      <Toasts items={toasts} dismiss={dismiss} raised={showAgent} />
     </div>
   );
 }
