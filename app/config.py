@@ -21,6 +21,11 @@ DB_SCHEMA = os.getenv("DB_SCHEMA", "hiring_agent").strip() or "hiring_agent"
 DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "1"))
 DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "8"))
 
+# Password gate. APP_PASSWORD khaali ho to app bilkul khuli rehti hai —
+# local dev me yahi theek hai, par public deploy par set karna zaroori hai.
+APP_USERNAME = os.getenv("APP_USERNAME", "admin").strip() or "admin"
+APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
+
 # Render/Railway jaise hosts apna PORT env var dete hain.
 PORT = int(os.getenv("PORT", "3000"))
 

@@ -34,6 +34,7 @@ Table — best match sabse upar
 APIFY_API_KEY=apify_api_xxxxxxxxxxxx
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxx
 DATABASE_URL=postgresql://user:pass@host.neon.tech/neondb?sslmode=require
+APP_PASSWORD=          # khaali = app khuli. Public deploy par zaroor bharo
 ```
 
 `DATABASE_URL` na ho to app phir bhi chalti hai — bas history, shortlist aur
@@ -48,7 +49,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Phir browser me kholo: **http://localhost:3000**
+Phir browser me kholo: **http://localhost:10000**  (ya jo `PORT` set kiya ho)
 
 Migrations server start hote hi apne aap chal jaati hain. Alag se chalana ho
 (deploy/CI) to:
@@ -62,7 +63,7 @@ python migrate.py --reset --yes   # hiring_agent schema gira kar naye sire se
 Dev me auto-reload chahiye to:
 
 ```bash
-uvicorn app.main:app --reload --port 3000
+uvicorn app.main:app --reload --port 10000
 ```
 
 ---
@@ -71,14 +72,15 @@ uvicorn app.main:app --reload --port 3000
 
 | File | Kaam |
 |---|---|
-| `run.py` | Entry point — uvicorn ko port 3000 par start karta hai |
+| `run.py` | Entry point — `0.0.0.0` par bind karta hai, port `$PORT` (default 10000) |
 | `app/main.py` | FastAPI app. `POST /api/search` NDJSON stream, `POST /api/extract` file→text, `GET /api/health` |
 | `app/llm.py` | OpenRouter calls — `deepseek/deepseek-v4-pro`. Do kaam: JD parse karna + jobs ko score karna |
 | `app/apify.py` | Dono scrapers chalata hai, output normalize karta hai, duplicates hatata hai |
 | `app/docs.py` | markitdown wrapper — PDF/DOCX se text nikaalta hai (local, koi LLM call nahi) |
 | `app/db.py` | Postgres connection pool + migration runner (`migrations/*.sql`) |
 | `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, stats |
-| `app/config.py` | `.env` load, limits, allowed file types, `DATABASE_URL` |
+| `app/config.py` | `.env` load, limits, allowed file types, `DATABASE_URL`, `APP_PASSWORD` |
+| `app/auth.py` | Optional HTTP Basic password gate — `APP_PASSWORD` set ho tabhi lagta hai |
 | `migrate.py` | Migrations alag se chalane ka CLI |
 | `migrations/*.sql` | Schema. File ka number hi version hai (`0001_init.sql` → 1) |
 | `public/index.html` | **Poora frontend** — React app (single-file), Tailwind theme, JD attach bar, NDJSON stream, table sort/filter/CSV |
@@ -154,6 +156,43 @@ Kuch cheezein jaan-boojh kar aise hain:
 
 Nayi migration add karni ho to `migrations/0002_kuch.sql` bana do — server agli
 baar start hote hi use apply kar dega.
+
+---
+
+## Deploy (Render)
+
+`/api/search` ek NDJSON stream hai jo scrape + scoring ke dauraan **1-3 minute
+tak khuli rehti hai**. Isliye serverless (Vercel Hobby ka 60s function limit)
+yahan nahi chalega — normal long-running container chahiye. Render ya Railway
+theek hain; DB already Neon par hai, to sirf app process host karna hai.
+
+Render par **New → Web Service**, repo connect karo, phir:
+
+| Setting | Value |
+|---|---|
+| Language | **Python 3** — dhyan se chuno, root me purana `package.json`/`server.js` pada hai jise dekh kar Render Node detect kar sakta hai |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `python run.py` |
+
+Environment variables: `APIFY_API_KEY`, `OPENROUTER_API_KEY`, `DATABASE_URL`
+(Neon ka **pooled** `-pooler` wala URL), aur `APP_PASSWORD`.
+
+Do cheezein jaan-boojh kar aise hain:
+
+- `run.py` `0.0.0.0` par bind karta hai aur `$PORT` uthata hai — container ke
+  bahar se connect karne ke liye dono zaroori hain. `127.0.0.1` par bind karoge
+  to host tumhari app tak pahunch hi nahi paayega.
+- `.python-version` me `3.12` pin hai. Bina pin ke host koi bhi version utha
+  leta hai aur `psycopg-binary` / `markitdown` ke wheels miss ho sakte hain.
+
+Migrations pehli deploy par khud chal jaati hain — logs me
+`migrations applied: 0001_init.sql` dikhega. Alag se koi step nahi.
+
+**`APP_PASSWORD` zaroor set karo.** Bina uske URL jisko bhi mila wo search chala
+kar tumhare Apify credits aur OpenRouter tokens jala sakta hai. Set karte hi
+browser khud username/password maangta hai (user default `admin`, `APP_USERNAME`
+se badal sakte ho). Sirf `/api/health` khula rehta hai taaki host ka uptime check
+chalta rahe — usme koi key ya DB detail nahi jaati.
 
 ---
 

@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import config, db, docs, store
+from .auth import BasicAuth
 from .apify import scrape_jobs
 from .llm import MODEL_ID, build_learning_plan, extract_search_params, score_jobs
 
@@ -361,3 +362,10 @@ async def import_legacy(req: ImportRequest) -> JSONResponse:
 
 # Frontend sabse aakhir me mount hota hai taaki /api/* routes pehle match hon.
 app.mount("/", StaticFiles(directory=str(config.PUBLIC_DIR), html=True), name="static")
+
+# Password set ho to poori app (API + frontend) uske peeche chali jaati hai.
+if config.APP_PASSWORD:
+    app.add_middleware(BasicAuth, username=config.APP_USERNAME, password=config.APP_PASSWORD)
+    log.info("password gate on (user: %s)", config.APP_USERNAME)
+else:
+    log.warning("APP_PASSWORD not set — app is open to anyone who has the URL")
