@@ -28,12 +28,17 @@ Table — best match sabse upar
 
 ## Setup
 
-`.env` file me do keys chahiye:
+`.env` file me do keys aur database URL chahiye:
 
 ```
 APIFY_API_KEY=apify_api_xxxxxxxxxxxx
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxx
+DATABASE_URL=postgresql://user:pass@host.neon.tech/neondb?sslmode=require
+APP_PASSWORD=          # khaali = app khuli. Public deploy par zaroor bharo
 ```
+
+`DATABASE_URL` na ho to app phir bhi chalti hai — bas history, shortlist aur
+plans save nahi honge (header me "DB offline" chip dikh jaayegi).
 
 Install aur run (Python 3.10+):
 
@@ -44,12 +49,21 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Phir browser me kholo: **http://localhost:3000**
+Phir browser me kholo: **http://localhost:10000**  (ya jo `PORT` set kiya ho)
+
+Migrations server start hote hi apne aap chal jaati hain. Alag se chalana ho
+(deploy/CI) to:
+
+```bash
+python migrate.py            # pending migrations apply
+python migrate.py --status   # kya baaki hai
+python migrate.py --reset --yes   # hiring_agent schema gira kar naye sire se
+```
 
 Dev me auto-reload chahiye to:
 
 ```bash
-uvicorn app.main:app --reload --port 3000
+uvicorn app.main:app --reload --port 10000
 ```
 
 ---
@@ -58,12 +72,17 @@ uvicorn app.main:app --reload --port 3000
 
 | File | Kaam |
 |---|---|
-| `run.py` | Entry point — uvicorn ko port 3000 par start karta hai |
+| `run.py` | Entry point — `0.0.0.0` par bind karta hai, port `$PORT` (default 10000) |
 | `app/main.py` | FastAPI app. `POST /api/search` NDJSON stream, `POST /api/extract` file→text, `GET /api/health` |
 | `app/llm.py` | OpenRouter calls — `deepseek/deepseek-v4-pro`. Do kaam: JD parse karna + jobs ko score karna |
 | `app/apify.py` | Dono scrapers chalata hai, output normalize karta hai, duplicates hatata hai |
 | `app/docs.py` | markitdown wrapper — PDF/DOCX se text nikaalta hai (local, koi LLM call nahi) |
-| `app/config.py` | `.env` load, limits, allowed file types |
+| `app/db.py` | Postgres connection pool + migration runner (`migrations/*.sql`) |
+| `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, stats |
+| `app/config.py` | `.env` load, limits, allowed file types, `DATABASE_URL`, `APP_PASSWORD` |
+| `app/auth.py` | Optional HTTP Basic password gate — `APP_PASSWORD` set ho tabhi lagta hai |
+| `migrate.py` | Migrations alag se chalane ka CLI |
+| `migrations/*.sql` | Schema. File ka number hi version hai (`0001_init.sql` → 1) |
 | `public/index.html` | **Poora frontend** — React app (single-file), Tailwind theme, JD attach bar, NDJSON stream, table sort/filter/CSV |
 | `scrape-jobs.js` | Purana Node CLI — sirf scraping ke liye, abhi bhi chalta hai |
 
@@ -75,19 +94,105 @@ uvicorn app.main:app --reload --port 3000
 
 | Endpoint | Kya karta hai |
 |---|---|
-| `GET /api/health` | model name + `.env` me keys hain ya nahi |
+| `GET /api/health` | model name + `.env` me keys hain ya nahi + DB status |
 | `POST /api/extract` | multipart `file` → `{ text, chars, words, filename }` |
-| `POST /api/search` | `{ jobDescription, limit, source, useAi }` → NDJSON stream |
-| `POST /api/recommend` | `{ profile, jobs }` → `{ plan, usage, model }` — skill gaps + 15/30 din ka plan |
+| `POST /api/search` | `{ jobDescription, limit, source, useAi }` → NDJSON stream (run DB me save hoti hai) |
+| `POST /api/recommend` | `{ profile, jobs, searchId }` → `{ plan, usage, model }` — skill gaps + 15/30 din ka plan |
+| `GET /api/searches` | `?limit=25&all=false` → history list (DB se) |
+| `GET /api/searches/{id}` | Ek run poori wapas — JD, params, jobs aur plan |
+| `DELETE /api/searches/{id}` | Ek run hatao (jobs cascade ho jaati hain) |
+| `DELETE /api/searches` | Poori history saaf |
+| `GET /api/saved` | Shortlist |
+| `POST /api/saved` | `{ job, searchId }` → shortlist me daalo (url par dedupe) |
+| `DELETE /api/saved?key=<job url>` | Shortlist se hatao |
+| `GET /api/stats` | Overview ke tiles — searches, roles, spend, average match |
+| `POST /api/import` | Purana localStorage data ek baar DB me — UI khud call karta hai |
 
 `/api/search` ke stream events:
 
 ```
+{"type":"search","searchId":12,"cost":0.052}
 {"type":"progress","stage":"parse|scrape|linkedin|indeed|score","message":"...","isError":false}
 {"type":"params","params":{...},"limit":50}
-{"type":"done","jobs":[...],"params":{...},"usage":{...},"model":"..."}
+{"type":"partial","jobs":[...],"params":{...}}
+{"type":"done","searchId":12,"jobs":[...],"params":{...},"usage":{...},"model":"..."}
 {"type":"error","message":"..."}
 ```
+
+---
+
+## Database (Neon Postgres)
+
+Pehle history aur shortlist browser ke `localStorage` me the — dusre browser me
+kholo to sab gayab. Ab sab Postgres me hai; `localStorage` me sirf theme aur
+"import ho chuka" wala flag bacha hai.
+
+**Schema `hiring_agent`** — ye Neon database dusre project ke saath share hota
+hai (uski tables `public` me hain, unka apna `alembic_version` bhi wahin hai).
+Naam takraane se bachne ke liye hamari tables alag schema me banti hain.
+`DB_SCHEMA` env var se badla ja sakta hai.
+
+| Table | Kya rakhti hai |
+|---|---|
+| `searches` | Har run — JD, params, source, limit, status, cost, token usage |
+| `jobs` | Us run ki postings + `match_score` / `match_reason`. `(search_id, job_key)` unique |
+| `saved_jobs` | Shortlist. `job_key` (url) unique — ek posting do baar save nahi hoti |
+| `plans` | `/api/recommend` ka 15/30 din wala plan, search se juda hua |
+| `schema_migrations` | Kaunsi migration lag chuki hai |
+
+Kuch cheezein jaan-boojh kar aise hain:
+
+- **Table names hamesha schema ke saath likhe jaate hain** (`"hiring_agent".jobs`),
+  `search_path` par bharosa nahi. Neon ka `-pooler` endpoint pgbouncer transaction
+  mode me chalta hai — wahan har transaction alag server connection par ja sakti
+  hai aur session ka `SET search_path` gayab ho jaata hai.
+- **psycopg ka sync pool + `asyncio.to_thread`**, async mode nahi. Windows par
+  uvicorn ProactorEventLoop banata hai jispar psycopg async chalta hi nahi.
+- **Search row pehle banti hai, baad me bharti hai.** Isliye beech me band hui
+  run `cancelled` aur fail hui run `error` status ke saath dikh jaati hai.
+  Server restart par purani `running` rows `interrupted` mark ho jaati hain.
+- **DB down ho to app chalti rehti hai** — search aur scoring waise hi chalte
+  hain, bas save nahi hota aur header me "DB offline" chip aa jaati hai.
+
+Nayi migration add karni ho to `migrations/0002_kuch.sql` bana do — server agli
+baar start hote hi use apply kar dega.
+
+---
+
+## Deploy (Render)
+
+`/api/search` ek NDJSON stream hai jo scrape + scoring ke dauraan **1-3 minute
+tak khuli rehti hai**. Isliye serverless (Vercel Hobby ka 60s function limit)
+yahan nahi chalega — normal long-running container chahiye. Render ya Railway
+theek hain; DB already Neon par hai, to sirf app process host karna hai.
+
+Render par **New → Web Service**, repo connect karo, phir:
+
+| Setting | Value |
+|---|---|
+| Language | **Python 3** — dhyan se chuno, root me purana `package.json`/`server.js` pada hai jise dekh kar Render Node detect kar sakta hai |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `python run.py` |
+
+Environment variables: `APIFY_API_KEY`, `OPENROUTER_API_KEY`, `DATABASE_URL`
+(Neon ka **pooled** `-pooler` wala URL), aur `APP_PASSWORD`.
+
+Do cheezein jaan-boojh kar aise hain:
+
+- `run.py` `0.0.0.0` par bind karta hai aur `$PORT` uthata hai — container ke
+  bahar se connect karne ke liye dono zaroori hain. `127.0.0.1` par bind karoge
+  to host tumhari app tak pahunch hi nahi paayega.
+- `.python-version` me `3.12` pin hai. Bina pin ke host koi bhi version utha
+  leta hai aur `psycopg-binary` / `markitdown` ke wheels miss ho sakte hain.
+
+Migrations pehli deploy par khud chal jaati hain — logs me
+`migrations applied: 0001_init.sql` dikhega. Alag se koi step nahi.
+
+**`APP_PASSWORD` zaroor set karo.** Bina uske URL jisko bhi mila wo search chala
+kar tumhare Apify credits aur OpenRouter tokens jala sakta hai. Set karte hi
+browser khud username/password maangta hai (user default `admin`, `APP_USERNAME`
+se badal sakte ho). Sirf `/api/health` khula rehta hai taaki host ka uptime check
+chalta rahe — usme koi key ya DB detail nahi jaati.
 
 ---
 
@@ -216,14 +321,14 @@ Do aur cheezein:
 
 ### Baaki views (sidebar)
 
-Ye sab **localStorage** par chalte hain, koi extra backend nahi:
+Ye sab **Postgres** se aate hain (`/api/searches`, `/api/saved`, `/api/stats`):
 
 | View | Kya dikhata hai |
 |---|---|
-| Overview | Stat tiles (searches run, roles matched, average match, estimated spend) + recent searches |
-| Searches | Purani runs (last 10). "Open results" se wo pipeline wapas khul jaata hai |
-| Matches | Aakhri search ka poora pipeline |
-| Saved | Jo roles shortlist kiye |
+| Overview | Stat tiles (searches run, roles matched, average match, estimated spend) — ab all-time, DB se — + recent searches |
+| Searches | Purani runs (last 50). "Open results" se JD, params, jobs aur plan sab wapas mil jaate hain; har row par delete bhi hai |
+| Matches | Aakhri (ya jo khola) search ka poora pipeline |
+| Saved | Jo roles shortlist kiye — `saved_jobs` table |
 
 - **Matched skill tags** LLM se nahi aate — backend per-job skills deta hi nahi. Ye client side derive hote hain: `params.mustHaveSkills` me se wahi dikhte hain jo posting ke title/description me actually milte hain
 - **Credits indicator** local estimate hai (`jobs × $0.0026` jod ke), asli Apify balance nahi

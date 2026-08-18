@@ -1,6 +1,8 @@
-"""FastAPI backend — search stream, PDF extract, aur static frontend."""
+"""FastAPI backend — search stream, PDF extract, Postgres persistence, aur static frontend."""
 import asyncio
 import json
+import logging
+from contextlib import asynccontextmanager
 from typing import AsyncIterator, Literal
 
 from fastapi import FastAPI, File, UploadFile
@@ -8,11 +10,32 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, docs
+from . import config, db, docs, store
+from .auth import BasicAuth
 from .apify import scrape_jobs
 from .llm import MODEL_ID, build_learning_plan, extract_search_params, score_jobs
 
-app = FastAPI(title="Hiring Agent", version="2.0.0")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
+log = logging.getLogger("hiring-agent")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Server start hote hi pending migrations chal jaate hain — alag se
+    # kuch chalane ki zaroorat nahi. DB na mile to app phir bhi chalti hai.
+    applied = await db.connect()
+    if applied:
+        log.info("migrations applied: %s", ", ".join(applied))
+    if db.enabled():
+        stale = await store.close_stale_searches()
+        if stale:
+            log.info("%s interrupted search(es) from a previous run marked closed", stale)
+        log.info("database ready (schema: %s)", config.DB_SCHEMA)
+    yield
+    await db.close()
+
+
+app = FastAPI(title="Hiring Agent", version="2.1.0", lifespan=lifespan)
 
 
 class SearchRequest(BaseModel):
@@ -28,6 +51,18 @@ class SearchRequest(BaseModel):
 class RecommendRequest(BaseModel):
     profile: str = ""
     jobs: list[dict] = Field(default_factory=list)
+    searchId: int | None = None
+
+
+class SaveRequest(BaseModel):
+    job: dict = Field(default_factory=dict)
+    searchId: int | None = None
+
+
+class ImportRequest(BaseModel):
+    """Purana localStorage data ek baar DB me daalne ke liye."""
+    searches: list[dict] = Field(default_factory=list)
+    saved: list[dict] = Field(default_factory=list)
 
 
 @app.get("/api/health")
@@ -37,6 +72,7 @@ async def health() -> dict:
         "model": MODEL_ID,
         "apifyKey": bool(config.APIFY_API_KEY),
         "openRouterKey": bool(config.OPENROUTER_API_KEY),
+        "db": db.status(),
     }
 
 
@@ -84,6 +120,18 @@ async def recommend(req: RecommendRequest) -> JSONResponse:
     except Exception as err:
         return JSONResponse({"error": f"Could not build a plan: {err}"}, status_code=502)
 
+    # Plan bhi search ke saath DB me rehta hai — history kholte hi wapas mil jaata hai.
+    try:
+        await store.save_plan(
+            search_id=req.searchId,
+            profile=profile,
+            plan=result["plan"],
+            usage=result.get("usage"),
+            model=MODEL_ID,
+        )
+    except Exception as err:
+        log.warning("plan could not be saved: %s", err)
+
     return JSONResponse({**result, "model": MODEL_ID})
 
 
@@ -110,6 +158,8 @@ async def search(req: SearchRequest):
 
 async def _search_stream(req: SearchRequest, job_description: str, limit: int) -> AsyncIterator[str]:
     queue: asyncio.Queue = asyncio.Queue()
+    search_id: int | None = None
+    finished = False
 
     async def send(event: dict) -> None:
         await queue.put(event)
@@ -118,7 +168,22 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
         await send({"type": "progress", "stage": stage, "message": message, "isError": is_error})
 
     async def pipeline() -> None:
+        nonlocal search_id, finished
         try:
+            # Row pehle ban jaati hai taaki adhoori/fail hui runs bhi dikh sakein.
+            try:
+                search_id = await store.start_search(
+                    job_description=job_description,
+                    limit=limit,
+                    source=req.source,
+                    use_ai=req.useAi,
+                    model=MODEL_ID if req.useAi else None,
+                )
+            except Exception as err:
+                log.warning("search row could not be created: %s", err)
+
+            await send({"type": "search", "searchId": search_id, "cost": store.estimate_cost(limit, req.source)})
+
             params = {"title": None, "location": "India", "country": "IN", "summary": "", "mustHaveSkills": []}
 
             if req.useAi:
@@ -165,10 +230,25 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
                 # Best match sabse upar.
                 jobs.sort(key=lambda j: j["matchScore"] if j.get("matchScore") is not None else -1, reverse=True)
 
-            await send({"type": "done", "jobs": jobs, "params": params, "usage": usage, "model": MODEL_ID})
+            try:
+                await store.finish_search(search_id, jobs=jobs, params=params, usage=usage)
+                finished = True
+            except Exception as err:
+                log.warning("search %s could not be saved: %s", search_id, err)
+
+            await send({
+                "type": "done",
+                "searchId": search_id,
+                "jobs": jobs,
+                "params": params,
+                "usage": usage,
+                "model": MODEL_ID,
+            })
         except asyncio.CancelledError:
             raise
         except Exception as err:
+            await store.fail_search(search_id, str(err))
+            finished = True
             await send({"type": "error", "message": str(err)})
         finally:
             await queue.put(None)
@@ -181,10 +261,111 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
                 break
             yield json.dumps(event, default=str) + "\n"
     finally:
-        # Browser tab band ho jaye to background kaam bhi rok do.
+        # Browser tab band ho jaye to background kaam bhi rok do — aur adhoori
+        # row ko 'running' me sadne mat do.
         if not task.done():
             task.cancel()
+        if not finished and search_id:
+            # Yahan await nahi kar sakte — generator khud cancel ho raha hota hai.
+            # Alag task chhod dete hain taaki row 'running' me na latki rahe.
+            _background(store.fail_search(search_id, "Search was stopped before it finished", status="cancelled"))
+
+
+# create_task ka reference rakhna zaroori hai, warna GC beech me utha leta hai.
+_tasks: set[asyncio.Task] = set()
+
+
+def _background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+
+# ─────────────────────────── history (DB) ───────────────────────────
+
+@app.get("/api/searches")
+async def list_searches(limit: int = 25, all: bool = False) -> JSONResponse:
+    if not db.enabled():
+        return JSONResponse({"searches": [], "db": db.status()})
+    rows = await store.list_searches(limit=max(1, min(100, limit)), include_all=all)
+    return JSONResponse({"searches": rows, "db": db.status()})
+
+
+@app.get("/api/searches/{search_id}")
+async def get_search(search_id: int) -> JSONResponse:
+    row = await store.get_search(search_id)
+    if not row:
+        return JSONResponse({"error": "Search not found"}, status_code=404)
+    return JSONResponse(row)
+
+
+@app.delete("/api/searches/{search_id}")
+async def delete_search(search_id: int) -> JSONResponse:
+    deleted = await store.delete_search(search_id)
+    if not deleted:
+        return JSONResponse({"error": "Search not found"}, status_code=404)
+    return JSONResponse({"ok": True, "deleted": deleted})
+
+
+@app.delete("/api/searches")
+async def clear_searches() -> JSONResponse:
+    return JSONResponse({"ok": True, "deleted": await store.clear_searches()})
+
+
+# ─────────────────────────── shortlist (DB) ───────────────────────────
+
+@app.get("/api/saved")
+async def list_saved() -> JSONResponse:
+    return JSONResponse({"saved": await store.list_saved()})
+
+
+@app.post("/api/saved")
+async def add_saved(req: SaveRequest) -> JSONResponse:
+    if not req.job:
+        return JSONResponse({"error": "No job supplied"}, status_code=400)
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected — shortlist cannot be saved"}, status_code=503)
+    try:
+        job = await store.add_saved(req.job, req.searchId)
+    except Exception as err:
+        # Sabse aam wajah: searchId ki row beech me delete ho gayi.
+        log.warning("could not save job: %s", err)
+        try:
+            job = await store.add_saved(req.job, None)
+        except Exception as retry_err:
+            return JSONResponse({"error": f"Could not save this job: {retry_err}"}, status_code=500)
+    return JSONResponse({"ok": True, "job": job, "key": store.job_key(req.job)})
+
+
+@app.delete("/api/saved")
+async def remove_saved(key: str) -> JSONResponse:
+    return JSONResponse({"ok": True, "deleted": await store.remove_saved(key)})
+
+
+# ─────────────────────────── overview + import ───────────────────────────
+
+@app.get("/api/stats")
+async def stats() -> JSONResponse:
+    if not db.enabled():
+        return JSONResponse({"searches": 0, "roles": 0, "spend": 0.0, "avgScore": None, "saved": 0, "db": db.status()})
+    return JSONResponse({**await store.stats(), "db": db.status()})
+
+
+@app.post("/api/import")
+async def import_legacy(req: ImportRequest) -> JSONResponse:
+    """Browser me pade purane searches/saved jobs ko ek baar DB me le aata hai."""
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected"}, status_code=503)
+    result = await store.import_legacy(req.searches, req.saved)
+    return JSONResponse({"ok": True, **result})
 
 
 # Frontend sabse aakhir me mount hota hai taaki /api/* routes pehle match hon.
 app.mount("/", StaticFiles(directory=str(config.PUBLIC_DIR), html=True), name="static")
+
+# Password set ho to poori app (API + frontend) uske peeche chali jaati hai.
+if config.APP_PASSWORD:
+    app.add_middleware(BasicAuth, username=config.APP_USERNAME, password=config.APP_PASSWORD)
+    log.info("password gate on (user: %s)", config.APP_USERNAME)
+else:
+    log.warning("APP_PASSWORD not set — app is open to anyone who has the URL")
