@@ -21,9 +21,6 @@ DB_SCHEMA = os.getenv("DB_SCHEMA", "hiring_agent").strip() or "hiring_agent"
 DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "1"))
 DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "8"))
 
-# Deploy par container ke bahar se connect karna hota hai, isliye default
-# 0.0.0.0. Local par sirf apni machine tak seemit rakhna ho to HOST=127.0.0.1.
-HOST = os.getenv("HOST", "0.0.0.0").strip() or "0.0.0.0"
 # Render/Railway jaise hosts apna PORT env var dete hain.
 PORT = int(os.getenv("PORT", "3000"))
 
