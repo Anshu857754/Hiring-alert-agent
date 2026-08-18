@@ -313,7 +313,26 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 
+/* Backend ab Postgres par baitha hai — history, shortlist aur spend sab wahin se
+   aate hain. localStorage sirf theme aur ek-baar wale import flag ke liye bacha hai. */
+const api = {
+  async req(path, options) {
+    const res = await fetch(path, options);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || data.detail || `Request failed (${res.status})`);
+    return data;
+  },
+  get(path) { return api.req(path); },
+  del(path) { return api.req(path, { method: 'DELETE' }); },
+  post(path, body) {
+    return api.req(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  },
+};
+
 const jobKey = (j) => j.url || `${j.source}:${j.title}:${j.company}`;
+
+const SOURCE_LABEL = { both: 'LinkedIn + Indeed', linkedin: 'LinkedIn', indeed: 'Indeed' };
+const sourceLabel = (h) => SOURCE_LABEL[h.source] || (Array.isArray(h.sources) ? h.sources.join(' + ') : '—');
 
 /* Score band: color ke saath hamesha ek text label bhi jaata hai,
    taaki matlab sirf rang se na nikalna pade. */
@@ -1221,22 +1240,22 @@ function EmptyState({ Icon, title, body }) {
   );
 }
 
-function Overview({ history, spend, go }) {
-  const totalRoles = history.reduce((n, h) => n + h.count, 0);
-  const scored = history.flatMap((h) => h.jobs.map((j) => j.matchScore)).filter((s) => s != null);
-  const avg = scored.length ? Math.round(scored.reduce((a, b) => a + b, 0) / scored.length) : null;
+function Overview({ history, stats, go }) {
+  /* Ye teeno ginti ab Postgres se aati hai — browser ki 10-search limit se
+     bandhi nahi, isliye "all time" sach me all time hai. */
+  const avg = stats.avgScore;
 
   return (
     <div className="space-y-8">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile label="Searches run" value={history.length} hint="Stored in this browser" />
-        <StatTile label="Roles matched" value={totalRoles.toLocaleString()} hint="Across all searches" />
+        <StatTile label="Searches run" value={stats.searches} hint="All time, from the database" />
+        <StatTile label="Roles matched" value={(stats.roles || 0).toLocaleString()} hint="Across all searches" />
         <StatTile label="Average match" value={avg == null ? '—' : `${avg}%`} hint={avg == null ? 'No AI scores yet' : 'AI-scored postings'} />
-        <StatTile label="Estimated spend" value={`$${spend.toFixed(2)}`} hint="Apify credits, local estimate" />
+        <StatTile label="Estimated spend" value={`$${(stats.spend || 0).toFixed(2)}`} hint="Apify credits, local estimate" />
       </div>
 
       <div>
-        <SectionHead title="Recent searches" description="Your last runs, kept locally in this browser."
+        <SectionHead title="Recent searches" description="Your last runs, saved in the database."
                      aside={<Button variant="primary" size="sm" onClick={() => go('new')}><Sparkles size={13} aria-hidden /> New search</Button>} />
         {history.length === 0 ? (
           <EmptyState Icon={History} title="No searches yet" body="Run your first search to see it here." />
@@ -1249,7 +1268,7 @@ function Overview({ history, spend, go }) {
                           className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-hover ${ring}`}>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-h3 font-medium text-fg">{h.title}</p>
-                      <p className="mt-0.5 text-sm text-fg-muted">{h.location} · {h.sources.join(' + ')} · {timeAgo(h.at)}</p>
+                      <p className="mt-0.5 text-sm text-fg-muted">{h.location} · {sourceLabel(h)} · {timeAgo(h.at)}</p>
                     </div>
                     <span className="shrink-0 text-sm tabular-nums text-fg-muted">{h.count} roles</span>
                     <ArrowRight size={14} aria-hidden className="shrink-0 text-fg-muted" />
@@ -1264,8 +1283,9 @@ function Overview({ history, spend, go }) {
   );
 }
 
-function Searches({ history, onOpen, onClear }) {
-  if (!history.length) return <EmptyState Icon={History} title="No search history" body="Searches you run are saved in this browser." />;
+function Searches({ history, loading, onOpen, onClear, onDelete }) {
+  if (loading) return <EmptyState Icon={History} title="Loading searches…" body="Fetching your history from the database." />;
+  if (!history.length) return <EmptyState Icon={History} title="No search history" body="Every search you run is stored in the database and shows up here." />;
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-line-subtle px-4 py-2.5">
@@ -1277,9 +1297,15 @@ function Searches({ history, onOpen, onClear }) {
           <li key={h.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-h3 font-medium text-fg">{h.title}</p>
-              <p className="mt-0.5 text-sm text-fg-muted">{h.location} · {h.sources.join(' + ')} · {h.count} roles · {timeAgo(h.at)}</p>
+              <p className="mt-0.5 text-sm text-fg-muted">
+                {h.location} · {sourceLabel(h)} · {h.count} roles · {timeAgo(h.at)}
+                {h.hasPlan && <> · <span className="text-brand-text">plan saved</span></>}
+              </p>
             </div>
             <Button size="sm" onClick={() => onOpen(h)}>Open results</Button>
+            <Button size="sm" variant="danger" onClick={() => onDelete(h)} aria-label={`Delete ${h.title}`}>
+              <Trash2 size={13} aria-hidden />
+            </Button>
           </li>
         ))}
       </ul>
@@ -1316,14 +1342,20 @@ function App() {
 
   const [model, setModel] = useState('deepseek/deepseek-v4-pro');
   const [toasts, setToasts] = useState([]);
-  const [history, setHistory] = useState(() => store.get('ha.history', []));
-  const [saved, setSaved] = useState(() => store.get('ha.saved', []));
+  /* history / saved / spend — teeno server par rehte hain (Postgres), state sirf
+     unka cache hai. Isi liye har mutation ke baad refresh() chalta hai. */
+  const [history, setHistory] = useState([]);
+  const [saved, setSaved] = useState([]);
+  const [stats, setStats] = useState({ searches: 0, roles: 0, spend: 0, avgScore: null, saved: 0 });
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [dbOk, setDbOk] = useState(true);
+  const [searchId, setSearchId] = useState(null);   // abhi ki run ki DB row id
 
   const pipelineRef = useRef(null);
 
   const savedKeys = useMemo(() => new Set(saved.map(jobKey)), [saved]);
   const cost = (limit * Math.max(sources.length, 1) * COST_PER_JOB).toFixed(2);
-  const spend = useMemo(() => history.reduce((n, h) => n + (h.cost || 0), 0), [history]);
+  const spend = stats.spend || 0;
   const skills = params?.mustHaveSkills || [];
   const creditsLeft = PLAN_BUDGET - spend;
   const showAgent = recommend && useAi && !busy && jobs.length > 0;
@@ -1354,18 +1386,65 @@ function App() {
   }, []);
   const dismiss = useCallback((id) => setToasts((t) => t.filter((x) => x.id !== id)), []);
 
-  useEffect(() => store.set('ha.saved', saved), [saved]);
-  useEffect(() => store.set('ha.history', history), [history]);
+  /* Server se history + shortlist + stats dobara le aata hai. */
+  const refresh = useCallback(async () => {
+    try {
+      const [h, s, st] = await Promise.all([
+        api.get('/api/searches?limit=50'),
+        api.get('/api/saved'),
+        api.get('/api/stats'),
+      ]);
+      setHistory(h.searches || []);
+      setSaved(s.saved || []);
+      setStats(st);
+    } catch {
+      /* DB down — health check pehle hi bata dega, dobara toast nahi karte */
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    fetch('/api/health').then((r) => r.json()).then((h) => {
+    fetch('/api/health').then((r) => r.json()).then(async (h) => {
       setModel(h.model);
       const missing = [];
       if (!h.apifyKey) missing.push('APIFY_API_KEY');
       if (!h.openRouterKey) missing.push('OPENROUTER_API_KEY');
       if (missing.length) toast('error', 'Missing API keys', `${missing.join(' and ')} not found in .env — searches will fail.`);
-    }).catch(() => {});
-  }, [toast]);
+
+      const db = h.db || {};
+      setDbOk(!!db.connected);
+      if (!db.connected) {
+        setHistoryLoading(false);
+        toast('warning', 'Database not connected',
+          db.configured ? `${db.error || 'Connection failed'} — history and saved jobs will not be stored.`
+                        : 'DATABASE_URL is not set in .env — history and saved jobs will not be stored.');
+        return;
+      }
+
+      // Purana browser-only data ek hi baar DB me chala jaata hai. Flag tabhi
+      // set hota hai jab import sach me ho gaya ho — warna agli baar phir koshish.
+      if (!store.get('ha.migrated', false)) {
+        const legacy = { searches: store.get('ha.history', []), saved: store.get('ha.saved', []) };
+        if (!legacy.searches.length && !legacy.saved.length) {
+          store.set('ha.migrated', true);
+        } else {
+          try {
+            const out = await api.post('/api/import', legacy);
+            store.set('ha.migrated', true);
+            if (out.searches || out.saved) {
+              toast('success', 'Moved into the database',
+                `${out.searches} search${out.searches === 1 ? '' : 'es'} and ${out.saved} saved job${out.saved === 1 ? '' : 's'} imported from this browser.`);
+            }
+          } catch (e) {
+            toast('warning', 'Could not import old browser data', e.message);
+          }
+        }
+      }
+
+      refresh();
+    }).catch(() => setHistoryLoading(false));
+  }, [toast, refresh]);
 
   const uploadFile = useCallback(async (file) => {
     setUploading(true);
@@ -1388,13 +1467,30 @@ function App() {
 
   const toggleSource = (id) => setSources((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
-  const toggleSave = (job) => {
+  /* Shortlist ab saved_jobs table me hai. UI turant badalta hai, request peeche
+     jaati hai — fail hone par wapas purani list par le aate hain. */
+  const toggleSave = async (job) => {
     const k = jobKey(job);
-    setSaved((prev) => {
-      if (prev.some((j) => jobKey(j) === k)) { toast('info', 'Removed from saved'); return prev.filter((j) => jobKey(j) !== k); }
-      toast('success', 'Saved to shortlist', job.title);
-      return [{ ...job, description: undefined }, ...prev];
-    });
+    const wasSaved = savedKeys.has(k);
+    const before = saved;
+
+    setSaved((prev) => (wasSaved
+      ? prev.filter((j) => jobKey(j) !== k)
+      : [{ ...job, description: undefined }, ...prev]));
+
+    try {
+      if (wasSaved) {
+        await api.del(`/api/saved?key=${encodeURIComponent(k)}`);
+        toast('info', 'Removed from saved');
+      } else {
+        await api.post('/api/saved', { job: { ...job, description: undefined }, searchId });
+        toast('success', 'Saved to shortlist', job.title);
+      }
+      api.get('/api/stats').then(setStats).catch(() => {});
+    } catch (e) {
+      setSaved(before);
+      toast('error', wasSaved ? 'Could not remove' : 'Could not save', e.message);
+    }
   };
 
   const exportCsv = (list) => {
@@ -1426,6 +1522,7 @@ function App() {
     setParams(null);
     setPlan(null);          // naya search = purana plan stale
     setPlanError('');
+    setSearchId(null);      // nayi DB row 'search' event ke saath aayegi
     setTimeout(() => pipelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
 
     const apiSource = sources.length === 2 ? 'both' : sources[0];
@@ -1462,6 +1559,10 @@ function App() {
             else if (ev.stage === 'score') setStage('Ranking candidates…');
             else setStage('Searching candidates…');
             if (ev.isError) toast('warning', 'Pipeline warning', ev.message);
+          } else if (ev.type === 'search') {
+            // Backend ne searches table me row bana di — saved jobs aur plan
+            // isi id se jud jaate hain.
+            setSearchId(ev.searchId);
           } else if (ev.type === 'params') {
             setParams(ev.params);
           } else if (ev.type === 'partial') {
@@ -1473,18 +1574,9 @@ function App() {
           } else if (ev.type === 'done') {
             setJobs(ev.jobs);
             setParams(ev.params || null);
-            setHistory((h) => [{
-              id: Date.now(),
-              at: new Date().toISOString(),
-              title: ev.params?.title || 'Search',
-              location: `${ev.params?.location || '—'} (${ev.params?.country || '—'})`,
-              sources: sources.map((s) => SOURCES.find((x) => x.id === s).label),
-              count: ev.jobs.length,
-              cost: +(limit * sources.length * COST_PER_JOB).toFixed(4),
-              skills: ev.params?.mustHaveSkills || [],
-              // description lambi hoti hai — localStorage bharne se bachate hain
-              jobs: ev.jobs.map(({ description, ...rest }) => rest),
-            }, ...h].slice(0, 10));
+            if (ev.searchId) setSearchId(ev.searchId);
+            // Backend ne run ko already save kar diya hai — bas dobara padh lete hain.
+            refresh();
             toast('success', `${ev.jobs.length} roles matched`,
               useAi ? 'Ranked by fit against your job description.' : 'AI ranking was off — results are unranked.');
           }
@@ -1503,12 +1595,13 @@ function App() {
     try {
       const res = await fetch('/api/recommend', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile: jd.trim(), jobs }),
+        body: JSON.stringify({ profile: jd.trim(), jobs, searchId }),
       });
       const data = await res.json();
       if (!res.ok) { setPlanError(data.error || `Request failed (${res.status})`); return; }
       setPlan(data.plan);
       setAgentOpen(true);
+      refresh();   // plan bhi search ke saath store ho gaya — history badge update
       toast('success', `${data.plan.planDays}-day plan ready`, `${data.plan.unlocks?.length || 0} roles could open up.`);
     } catch (e) {
       setPlanError(e.message);
@@ -1517,10 +1610,43 @@ function App() {
     }
   };
 
-  const openHistory = (h) => {
-    setJobs(h.jobs);
-    setParams({ title: h.title, mustHaveSkills: h.skills || [] });
-    setView('matches');
+  /* Purani run kholna = DB se poora record wapas laana: jobs, JD, params aur
+     agar plan bana tha to wo bhi. Pehle sirf browser me pada adhoora copy milta tha. */
+  const openHistory = async (h) => {
+    try {
+      const full = await api.get(`/api/searches/${h.id}`);
+      setJobs(full.jobs || []);
+      setParams(full.params || { title: full.title, mustHaveSkills: full.skills || [] });
+      setSearchId(full.id);
+      setPlan(full.plan || null);
+      setPlanError('');
+      if (full.jobDescription) setJd(full.jobDescription);
+      setView('matches');
+    } catch (e) {
+      toast('error', 'Could not open that search', e.message);
+    }
+  };
+
+  const deleteSearch = async (h) => {
+    try {
+      await api.del(`/api/searches/${h.id}`);
+      if (searchId === h.id) { setJobs([]); setParams(null); setSearchId(null); }
+      toast('info', 'Search deleted', h.title);
+      refresh();
+    } catch (e) {
+      toast('error', 'Could not delete', e.message);
+    }
+  };
+
+  const clearHistory = async () => {
+    try {
+      const out = await api.del('/api/searches');
+      setJobs([]); setParams(null); setSearchId(null);
+      toast('info', 'History cleared', `${out.deleted} search${out.deleted === 1 ? '' : 'es'} removed.`);
+      refresh();
+    } catch (e) {
+      toast('error', 'Could not clear history', e.message);
+    }
   };
 
   const titles = {
@@ -1565,6 +1691,12 @@ function App() {
             <span className="hidden items-center gap-1.5 text-xs font-medium text-fg-muted md:inline-flex">
               <Sparkles size={12} aria-hidden /> {model}
             </span>
+            {!dbOk && (
+              <span title="History and saved jobs are not being stored"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2 py-1 text-xs font-medium text-warning-text">
+                <AlertTriangle size={11} aria-hidden /> DB offline
+              </span>
+            )}
             <span className={`hidden items-center gap-1.5 text-xs font-medium sm:inline-flex ${
               creditsLeft < 1 ? 'rounded-md border border-warning-border bg-warning-subtle px-2 py-1 text-warning-text' : 'text-fg-muted'
             }`}>
@@ -1596,8 +1728,9 @@ function App() {
               </div>
             )}
 
-            {view === 'overview' && <Overview history={history} spend={spend} go={setView} />}
-            {view === 'searches' && <Searches history={history} onOpen={openHistory} onClear={() => { setHistory([]); toast('info', 'History cleared'); }} />}
+            {view === 'overview' && <Overview history={history} stats={stats} go={setView} />}
+            {view === 'searches' && <Searches history={history} loading={historyLoading} onOpen={openHistory}
+                                              onClear={clearHistory} onDelete={deleteSearch} />}
             {view === 'matches' && (
               <Pipeline jobs={jobs} skills={skills} busy={busy} stage={stage}
                         savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)} />
