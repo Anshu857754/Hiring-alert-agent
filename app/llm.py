@@ -264,3 +264,101 @@ async def build_learning_plan(profile: str, jobs: list[dict], api_key: str) -> d
         },
         "usage": usage,
     }
+
+
+OUTREACH_PROMPT = """You are helping a job seeker send ONE personal outreach message about a specific job posting they want.
+
+You get: the posting, the company name, and the seeker's own profile/resume.
+
+Step 1 — company size. Estimate how many employees the company has today. Use what you know about the company; if the name is unfamiliar or ambiguous, say so honestly instead of guessing a precise number.
+
+Step 2 — pick who to write to, using this rule:
+- fewer than {threshold} employees -> the founder / CEO
+- {threshold} or more -> an HR / talent / recruiting person
+- genuinely unsure of the size -> HR / talent
+
+Step 3 — write the message for that person. A founder note and an HR note are not the same: founders respond to what you can build for them and why their specific product interests you; HR responds to how cleanly you fit the requirements they published.
+
+Return ONLY a JSON object:
+{{
+  "employees": <integer best estimate, or null if you truly do not know>,
+  "sizeBand": "1-10" | "11-50" | "51-200" | "201-500" | "501-1000" | "1000+" | "unknown",
+  "confidence": "high" | "medium" | "low",
+  "sizeBasis": "max 15 words on what your estimate is based on",
+  "targetRole": "the exact job title to look for, e.g. 'Founder & CEO' or 'Talent Acquisition Lead'",
+  "targetWhy": "max 20 words on why this person, for this company",
+  "channel": "LinkedIn DM" | "Email" | "LinkedIn connection request",
+  "subject": "email-style subject line, max 8 words",
+  "connectionNote": "LinkedIn connection request note, HARD LIMIT 280 characters",
+  "message": "the full message, 90-150 words",
+  "followUp": "one-line follow-up to send after 5-7 days if there is no reply"
+}}
+
+Rules for the message:
+- Open with something specific to THIS company or role. Never "I came across your job posting" alone.
+- Name two or three things from the seeker's profile that map to what the posting actually asks for. Use only what is in the profile — never invent experience, numbers, or employers.
+- One clear ask at the end (a short call, or whether they are open to reviewing a profile).
+- No flattery, no buzzwords, no "I am writing to express my keen interest". Plain sentences a real person would send.
+- If the profile is thin on what the posting needs, be honest about the angle rather than overclaiming."""
+
+
+def _outreach_user_msg(job: dict, profile: str) -> str:
+    description = re.sub(r"\s+", " ", job.get("description") or "")[:1200]
+    return "\n".join(
+        [
+            f"COMPANY: {job.get('company') or 'unknown'}",
+            f"ROLE: {job.get('title') or '-'}",
+            f"LOCATION: {job.get('location') or '-'}",
+            f"LEVEL: {job.get('experienceLevel') or '-'}",
+            f"POSTING: {description or '(no description was scraped)'}",
+            "",
+            "---",
+            "",
+            f"SEEKER PROFILE:\n{profile[:5000]}",
+        ]
+    )
+
+
+async def draft_outreach(job: dict, profile: str, api_key: str, threshold: int = 150) -> dict[str, Any]:
+    """Ek posting ke liye reach-out draft banata hai.
+
+    Founder-ya-HR ka faisla yahan se nahi hota — wo store/route me threshold se
+    tay hota hai. Model sirf size estimate karta hai aur usi hisaab se likhta hai.
+    """
+    data, usage = await _chat(
+        [
+            {"role": "system", "content": OUTREACH_PROMPT.format(threshold=threshold)},
+            {"role": "user", "content": _outreach_user_msg(job, profile)},
+        ],
+        api_key,
+        temperature=0.5,
+    )
+
+    employees = data.get("employees")
+    if not isinstance(employees, int) or employees <= 0:
+        employees = None
+
+    confidence = str(data.get("confidence") or "low").lower()
+    if confidence not in ("high", "medium", "low"):
+        confidence = "low"
+
+    note = (data.get("connectionNote") or "").strip()
+    if len(note) > 300:  # model kabhi kabhi limit cross kar deta hai
+        note = note[:297].rsplit(" ", 1)[0] + "..."
+
+    return {
+        "draft": {
+            "employees": employees,
+            "sizeBand": data.get("sizeBand") or "unknown",
+            "confidence": confidence,
+            "sizeBasis": (data.get("sizeBasis") or "").strip(),
+            "targetRole": (data.get("targetRole") or "").strip(),
+            "targetWhy": (data.get("targetWhy") or "").strip(),
+            "channel": (data.get("channel") or "LinkedIn DM").strip(),
+            "subject": (data.get("subject") or "").strip(),
+            "connectionNote": note,
+            "message": (data.get("message") or "").strip(),
+            "followUp": (data.get("followUp") or "").strip(),
+        },
+        "usage": usage,
+    }

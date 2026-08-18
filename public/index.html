@@ -255,10 +255,10 @@ body, .themed { transition: background-color .18s ease, border-color .18s ease, 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'https://esm.sh/react@18.3.1';
 import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
 import {
-  AlertTriangle, ArrowRight, Bookmark, BookmarkCheck, Building2, Check, CheckCircle2,
-  ChevronDown, Clock, Download, ExternalLink, FileText, GraduationCap, History, Info,
-  LayoutGrid, Loader2, MapPin, Menu, Minus, Moon, Paperclip, Plus, Search, Settings,
-  Sparkles, Sun, Target, Trash2, TrendingUp, Users, X, XCircle,
+  AlertTriangle, ArrowRight, Bookmark, BookmarkCheck, Briefcase, Building2, Check, CheckCircle2,
+  ChevronDown, Clock, Copy, Download, ExternalLink, FileText, GraduationCap, History, Info,
+  LayoutGrid, Loader2, MapPin, Menu, Minus, Moon, Paperclip, Plus, RefreshCw, Search, Send,
+  Settings, Sparkles, Sun, Target, Trash2, TrendingUp, UserRound, Users, X, XCircle,
 } from 'https://esm.sh/lucide-react@0.462.0?deps=react@18.3.1';
 
 /* ═══════════════════════ constants ═══════════════════════ */
@@ -266,6 +266,9 @@ import {
 const COST_PER_JOB = 0.0026;
 const MIN_LIMIT = 10;   // app/config.py se match
 const MAX_LIMIT = 30;
+// Sirf UI text ke liye — asli faisla backend (app/outreach.py) leta hai,
+// draft khud apna threshold saath laata hai.
+const FOUNDER_MAX_EMPLOYEES = 150;
 const STEP = 5;
 const PLAN_BUDGET = 5;
 
@@ -283,6 +286,7 @@ const NAV = [
   { id: 'searches', label: 'Searches', icon: History },
   { id: 'matches', label: 'Matches', icon: Users },
   { id: 'saved', label: 'Saved', icon: Bookmark },
+  { id: 'contacts', label: 'Contacts', icon: Send },
 ];
 
 const SAMPLE_JD = `Senior Backend Engineer — Bengaluru (Hybrid)
@@ -330,6 +334,31 @@ const api = {
 };
 
 const jobKey = (j) => j.url || `${j.source}:${j.title}:${j.company}`;
+
+/* Contacts view se khula hua job asli posting nahi, sirf draft ka stub ho
+   sakta hai — uske paas key pehle se hoti hai. */
+const keyOf = (j) => j.__key || jobKey(j);
+
+/* navigator.clipboard sirf secure context me milta hai; local http par
+   purana execCommand hi bachata hai. */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch { return false; }
+  }
+}
 
 const SOURCE_LABEL = { both: 'LinkedIn + Indeed', linkedin: 'LinkedIn', indeed: 'Indeed' };
 const sourceLabel = (h) => SOURCE_LABEL[h.source] || (Array.isArray(h.sources) ? h.sources.join(' + ') : '—');
@@ -508,7 +537,7 @@ function ThemeSwitch({ theme, setTheme }) {
 
 /* ═══════════════════════ sidebar ═══════════════════════ */
 
-function Sidebar({ view, setView, savedCount, spend, onNavigate }) {
+function Sidebar({ view, setView, savedCount, contactCount, spend, onNavigate }) {
   const left = PLAN_BUDGET - spend;
   const pct = Math.min(100, (spend / PLAN_BUDGET) * 100);
   const low = left < 1;
@@ -537,6 +566,9 @@ function Sidebar({ view, setView, savedCount, spend, onNavigate }) {
               <span className="flex-1 text-left">{label}</span>
               {id === 'saved' && savedCount > 0 && (
                 <span className="rounded border border-line bg-surface px-1.5 text-xs font-semibold tabular-nums text-fg-sec">{savedCount}</span>
+              )}
+              {id === 'contacts' && contactCount > 0 && (
+                <span className="rounded border border-line bg-surface px-1.5 text-xs font-semibold tabular-nums text-fg-sec">{contactCount}</span>
               )}
             </button>
           );
@@ -825,7 +857,7 @@ function ConfigSection({ limit, setLimit, sources, toggleSource, useAi, setUseAi
 
 /* ═══════════════════════ result row ═══════════════════════ */
 
-function JobRow({ job, skills, saved, onSave }) {
+function JobRow({ job, skills, saved, onSave, draft, onReachOut }) {
   const band = scoreBand(job.matchScore);
   const tags = matchedSkills(job, skills);
 
@@ -873,9 +905,23 @@ function JobRow({ job, skills, saved, onSave }) {
               <span className="font-medium text-fg-sec">AI summary — </span>{job.matchReason}
             </p>
           )}
+
+          {/* draft ban chuka ho to faisla yahin dikh jaaye — modal kholna na pade */}
+          {draft && (
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+              <TargetChip target={draft.target} />
+              <span>{sizeLine(draft)} · message ready</span>
+            </p>
+          )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {onReachOut && (
+            <Button size="sm" variant={draft ? 'secondary' : 'primary'} onClick={() => onReachOut(job)}
+                    aria-label={draft ? `Open the outreach draft for ${job.title}` : `Draft an outreach message for ${job.title}`}>
+              <Send size={13} aria-hidden /> {draft ? 'View draft' : 'Reach out'}
+            </Button>
+          )}
           <Button size="sm" onClick={() => onSave(job)} aria-pressed={saved}
                   aria-label={saved ? `Remove ${job.title} from saved` : `Save ${job.title}`}>
             {saved ? <><BookmarkCheck size={13} aria-hidden className="text-brand-text" /> Saved</> : <><Bookmark size={13} aria-hidden /> Save</>}
@@ -1117,9 +1163,253 @@ function AgentDock({ open, setOpen, plan, loading, error, jobs, onGenerate, onCl
   );
 }
 
+/* ═══════════════════════ reach out — founder ya HR ═══════════════════════ */
+/* Faisla backend ka hai (app/outreach.py): company me FOUNDER_MAX_EMPLOYEES se
+   kam log hain to seedha founder, warna HR. UI sirf wahi faisla, uski wajah aur
+   bheja jaane wala message dikhata hai. */
+
+const FOUNDER = 'founder';
+
+const targetLook = (target) => (target === FOUNDER
+  ? { Icon: UserRound, label: 'Founder / CEO', chip: 'border-brand-border bg-brand-subtle text-brand-text' }
+  : { Icon: Briefcase, label: 'HR / Recruiter', chip: 'border-info-border bg-info-subtle text-info-text' });
+
+function TargetChip({ target }) {
+  const { Icon, label, chip } = targetLook(target);
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-semibold ${chip}`}>
+      <Icon size={12} aria-hidden /> {label}
+    </span>
+  );
+}
+
+/* Size ek hi jagah se likhi jaati hai — kabhi exact ginti, kabhi sirf band. */
+function sizeLine(draft) {
+  if (draft.employees) return `~${draft.employees.toLocaleString()} employees`;
+  if (draft.sizeBand && draft.sizeBand !== 'unknown') return `${draft.sizeBand} employees`;
+  return 'Company size unknown';
+}
+
+/* Har text block ke saath copy button — message haath se select karna hi
+   sabse zyada chidhane wala step tha. */
+function CopyBox({ label, value, hint }) {
+  const [done, setDone] = useState(false);
+  if (!value) return null;
+
+  const copy = async () => {
+    if (!(await copyText(value))) return;
+    setDone(true);
+    setTimeout(() => setDone(false), 1600);
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{label}</p>
+        <Button size="sm" variant="ghost" onClick={copy} aria-label={`Copy ${label.toLowerCase()}`}>
+          {done
+            ? <><Check size={12} aria-hidden className="text-success-text" /> Copied</>
+            : <><Copy size={12} aria-hidden /> Copy</>}
+        </Button>
+      </div>
+      <p className="mt-1 whitespace-pre-wrap rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm leading-6 text-fg-sec">{value}</p>
+      {hint && <p className="mt-1 text-xs text-fg-muted">{hint}</p>}
+    </div>
+  );
+}
+
+function OutreachBody({ draft }) {
+  const note = draft.connectionNote || '';
+
+  return (
+    <div className="space-y-4">
+      {/* sabse upar faisla: kis tak jaana hai aur kyun */}
+      <div className="rounded-lg border border-line bg-surface-sunken p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <TargetChip target={draft.target} />
+          <span className="min-w-0 truncate text-sm font-medium text-fg">{draft.targetRole || targetLook(draft.target).label}</span>
+          <span className="ml-auto shrink-0 text-xs tabular-nums text-fg-muted">{sizeLine(draft)}</span>
+        </div>
+        <p className="mt-2 text-sm leading-5 text-fg-sec">{draft.targetReason}</p>
+        {draft.sizeBasis && (
+          <p className="mt-1 text-xs text-fg-muted">
+            Estimate: {draft.sizeBasis}{draft.confidence ? ` · ${draft.confidence} confidence` : ''}
+          </p>
+        )}
+        {draft.targetAdjusted && (
+          <p className="mt-2 flex items-start gap-1.5 text-xs text-warning-text">
+            <AlertTriangle size={12} aria-hidden className="mt-px shrink-0" />
+            The model wrote for a different contact — reread the tone before you send it.
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {draft.searchUrl && (
+          <a href={draft.searchUrl} target="_blank" rel="noopener"
+             className={`inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-surface px-3 text-sm font-medium text-fg-sec shadow-sm transition-colors hover:border-line-strong hover:bg-surface-hover ${ring}`}>
+            <Search size={12} aria-hidden /> Find this person on LinkedIn <ExternalLink size={11} aria-hidden />
+          </a>
+        )}
+        {draft.channel && <span className="text-xs text-fg-muted">Best channel — <b className="font-semibold text-fg-sec">{draft.channel}</b></span>}
+      </div>
+
+      <CopyBox label="Subject" value={draft.subject} />
+      <CopyBox label="Message" value={draft.message} />
+      <CopyBox label="Connection note" value={note}
+               hint={note ? `${note.length} characters — LinkedIn invites cut off at 300.` : null} />
+      <CopyBox label="Follow-up" value={draft.followUp} hint="Only if there is no reply in 5–7 days." />
+
+      {draft.targetWhy && <p className="text-xs text-fg-muted">Why this person: {draft.targetWhy}</p>}
+    </div>
+  );
+}
+
+function OutreachModal({ job, draft, loading, error, onClose, onRetry }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
+      <div className="absolute inset-0 bg-overlay" onClick={onClose} aria-hidden />
+      <div role="dialog" aria-modal="true" aria-label={`Reach out about ${job.title || 'this role'}`}
+           className="themed fade-up relative flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-xl border border-line bg-surface shadow-lg sm:rounded-xl">
+
+        <header className="flex shrink-0 items-start gap-3 border-b border-line-subtle bg-surface-sunken px-4 py-3">
+          <span aria-hidden className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand text-brand-on">
+            <Send size={15} />
+          </span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="truncate text-h3 font-semibold text-fg">{job.title || 'Untitled role'}</p>
+            <p className="truncate text-sm text-fg-muted">{job.company || 'Unknown company'}</p>
+          </div>
+          {draft && !loading && !job.__stub && (
+            <Button size="sm" variant="ghost" onClick={onRetry}><RefreshCw size={12} aria-hidden /> Redraft</Button>
+          )}
+          <button onClick={onClose} aria-label="Close draft"
+                  className={`rounded-md p-1.5 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg ${ring}`}>
+            <X size={15} />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {loading && (
+            <div className="flex items-center gap-2 text-sm text-fg-muted">
+              <Loader2 size={14} aria-hidden className="animate-spin text-brand-text" />
+              Sizing up {job.company || 'the company'} and writing the message…
+            </div>
+          )}
+
+          {!loading && error && (
+            <>
+              <InlineStatus type="error">{error}</InlineStatus>
+              <Button size="sm" className="mt-3" onClick={onRetry}><RefreshCw size={12} aria-hidden /> Try again</Button>
+            </>
+          )}
+
+          {!loading && !error && draft && <OutreachBody draft={draft} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const CONTACT_TABS = [
+  { id: 'all', label: 'All' },
+  { id: FOUNDER, label: 'Founders' },
+  { id: 'hr', label: 'HR' },
+];
+
+function Contacts({ drafts, jobs, onOpen }) {
+  const [tab, setTab] = useState('all');
+  const all = useMemo(() => Object.values(drafts), [drafts]);
+  const founders = all.filter((d) => d.target === FOUNDER).length;
+  const rows = tab === 'all' ? all : all.filter((d) => (tab === FOUNDER ? d.target === FOUNDER : d.target !== FOUNDER));
+
+  if (!all.length) {
+    return (
+      <EmptyState Icon={Send} title="No one drafted yet"
+                  body={`Hit Reach out on any match. Under ${FOUNDER_MAX_EMPLOYEES} employees the message goes to the founder; above that, to HR.`} />
+    );
+  }
+
+  const counts = { all: all.length, [FOUNDER]: founders, hr: all.length - founders };
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle px-4 py-2.5">
+        <h3 className="mr-1 text-sm font-semibold text-fg">
+          {rows.length} <span className="font-normal text-fg-muted">of {all.length} drafted</span>
+        </h3>
+        <div className="flex gap-1">
+          {CONTACT_TABS.map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)} aria-pressed={tab === t.id}
+                    className={`h-8 rounded-md px-2.5 text-sm font-medium transition-colors ${ring} ${
+                      tab === t.id ? 'bg-surface-selected text-brand-text' : 'text-fg-muted hover:bg-surface-hover hover:text-fg'
+                    }`}>
+              {t.label} <span className="tabular-nums">({counts[t.id]})</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="px-6 py-10 text-center">
+          <p className="text-h3 font-medium text-fg">Nothing in this group yet</p>
+          <p className="mt-1 text-sm text-fg-muted">
+            {tab === FOUNDER
+              ? `No company you drafted came out under ${FOUNDER_MAX_EMPLOYEES} employees.`
+              : 'Every company you drafted so far is small enough to go straight to the founder.'}
+          </p>
+        </div>
+      ) : (
+        <ul className="divide-y divide-line-subtle">
+          {rows.map((d) => {
+            /* asli posting mil jaaye to redraft ho sakta hai, warna sirf padhne ke liye */
+            const job = jobs.find((j) => jobKey(j) === d.jobKey)
+              || { title: d.jobTitle, company: d.company, __key: d.jobKey, __stub: true };
+            return (
+              <li key={d.jobKey} className="px-4 py-3 transition-colors hover:bg-surface-hover">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <TargetChip target={d.target} />
+                      <h3 className="truncate text-h3 font-semibold text-fg">{d.company || 'Unknown company'}</h3>
+                    </div>
+                    <p className="mt-1 text-sm text-fg-muted">
+                      {d.jobTitle || 'Untitled role'} · {d.targetRole || targetLook(d.target).label} · {sizeLine(d)}
+                      {d.at ? ` · ${timeAgo(d.at)}` : ''}
+                    </p>
+                    {d.message && <p className="mt-2 line-clamp-2 text-sm text-fg-sec">{d.message}</p>}
+                  </div>
+
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    {d.searchUrl && (
+                      <a href={d.searchUrl} target="_blank" rel="noopener"
+                         className={`inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-surface px-3 text-sm font-medium text-fg-sec shadow-sm transition-colors hover:border-line-strong hover:bg-surface-hover ${ring}`}>
+                        Find person <ExternalLink size={12} aria-hidden />
+                      </a>
+                    )}
+                    <Button size="sm" variant="primary" onClick={() => onOpen(job)}>
+                      <Send size={13} aria-hidden /> Open draft
+                    </Button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 /* ═══════════════════════ pipeline ═══════════════════════ */
 
-function Pipeline({ jobs, skills, busy, stage, savedKeys, onSave, onExport }) {
+function Pipeline({ jobs, skills, busy, stage, savedKeys, onSave, onExport, drafts = {}, onReachOut }) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('relevance');
   const [src, setSrc] = useState('all');
@@ -1209,7 +1499,10 @@ function Pipeline({ jobs, skills, busy, stage, savedKeys, onSave, onExport }) {
         </div>
       ) : (
         <ul className="divide-y divide-line-subtle">
-          {rows.map((j) => <JobRow key={jobKey(j)} job={j} skills={skills} saved={savedKeys.has(jobKey(j))} onSave={onSave} />)}
+          {rows.map((j) => (
+            <JobRow key={jobKey(j)} job={j} skills={skills} saved={savedKeys.has(jobKey(j))} onSave={onSave}
+                    draft={drafts[jobKey(j)]} onReachOut={onReachOut} />
+          ))}
         </ul>
       )}
     </Card>
@@ -1350,6 +1643,12 @@ function App() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [dbOk, setDbOk] = useState(true);
   const [searchId, setSearchId] = useState(null);   // abhi ki run ki DB row id
+
+  /* reach out — jobKey se keyed drafts, aur abhi khula hua modal */
+  const [drafts, setDrafts] = useState({});
+  const [outreachJob, setOutreachJob] = useState(null);
+  const [outreachLoading, setOutreachLoading] = useState(false);
+  const [outreachError, setOutreachError] = useState('');
 
   const pipelineRef = useRef(null);
 
@@ -1522,6 +1821,8 @@ function App() {
     setParams(null);
     setPlan(null);          // naya search = purana plan stale
     setPlanError('');
+    setDrafts({});          // ...aur purane reach-out drafts bhi
+    setOutreachJob(null);
     setSearchId(null);      // nayi DB row 'search' event ke saath aayegi
     setTimeout(() => pipelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
 
@@ -1610,6 +1911,54 @@ function App() {
     }
   };
 
+  /* ---------------------------- reach out ----------------------------
+     Founder-ya-HR ka faisla server par hota hai (app/outreach.py); yahan bas
+     draft mangwaate hain, cache karte hain aur modal me dikha dete hain. */
+
+  const loadDrafts = useCallback(async (id) => {
+    if (!id) { setDrafts({}); return; }
+    try {
+      const out = await api.get(`/api/outreach?searchId=${id}`);
+      setDrafts(out.drafts || {});
+    } catch {
+      /* DB off — drafts sirf is session ke liye memory me rahenge */
+    }
+  }, []);
+
+  const generateOutreach = useCallback(async (job) => {
+    const profile = jd.trim();
+    if (profile.length < 20) {
+      setOutreachError('Add your resume or profile under New Search first — the message is written from it.');
+      return;
+    }
+
+    setOutreachLoading(true);
+    setOutreachError('');
+    try {
+      const { __key, __stub, ...posting } = job;
+      const data = await api.post('/api/outreach', { job: posting, profile, searchId });
+      const key = data.key || keyOf(job);
+      setDrafts((prev) => ({ ...prev, [key]: data.draft }));
+      toast('success', `Draft ready — ${data.draft.targetLabel}`, data.draft.targetReason);
+    } catch (e) {
+      setOutreachError(e.message);
+    } finally {
+      setOutreachLoading(false);
+    }
+  }, [jd, searchId, toast]);
+
+  /* Ek hi draft dobara nahi banwaate — pehle se hai to seedha khol dete hain. */
+  const openOutreach = useCallback((job) => {
+    setOutreachJob(job);
+    setOutreachError('');
+    if (!drafts[keyOf(job)]) generateOutreach(job);
+  }, [drafts, generateOutreach]);
+
+  const closeOutreach = useCallback(() => {
+    setOutreachJob(null);
+    setOutreachError('');
+  }, []);
+
   /* Purani run kholna = DB se poora record wapas laana: jobs, JD, params aur
      agar plan bana tha to wo bhi. Pehle sirf browser me pada adhoora copy milta tha. */
   const openHistory = async (h) => {
@@ -1620,6 +1969,7 @@ function App() {
       setSearchId(full.id);
       setPlan(full.plan || null);
       setPlanError('');
+      loadDrafts(full.id);
       if (full.jobDescription) setJd(full.jobDescription);
       setView('matches');
     } catch (e) {
@@ -1655,10 +2005,11 @@ function App() {
     searches: ['Searches', 'Every search you have run in this browser.'],
     matches: ['Matches', 'The ranked pipeline from your most recent search.'],
     saved: ['Saved', 'Roles you shortlisted for a closer look.'],
+    contacts: ['Contacts', `Who to message at each company — founder under ${FOUNDER_MAX_EMPLOYEES} employees, HR above it.`],
   };
   const [pageTitle, pageSub] = titles[view];
 
-  const sidebarProps = { view, setView, savedCount: saved.length, spend };
+  const sidebarProps = { view, setView, savedCount: saved.length, contactCount: Object.keys(drafts).length, spend };
 
   return (
     <div className="flex h-full overflow-hidden bg-app">
@@ -1722,7 +2073,8 @@ function App() {
                   <SectionHead step="3" title={<span id="pipe-head">Candidate pipeline</span>}
                                description={jobs.length ? 'Ranked by how closely each posting matches your JD.' : 'Results land here once the search finishes.'} />
                   <Pipeline jobs={jobs} skills={skills} busy={busy} stage={stage}
-                            savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)} />
+                            savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)}
+                            drafts={drafts} onReachOut={openOutreach} />
 
                 </section>
               </div>
@@ -1733,8 +2085,11 @@ function App() {
                                               onClear={clearHistory} onDelete={deleteSearch} />}
             {view === 'matches' && (
               <Pipeline jobs={jobs} skills={skills} busy={busy} stage={stage}
-                        savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)} />
+                        savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)}
+                        drafts={drafts} onReachOut={openOutreach} />
             )}
+
+            {view === 'contacts' && <Contacts drafts={drafts} jobs={jobs} onOpen={openOutreach} />}
             {view === 'saved' && (
               saved.length === 0
                 ? <EmptyState Icon={Bookmark} title="Nothing saved yet" body="Use Save on any result to shortlist it here." />
@@ -1744,7 +2099,10 @@ function App() {
                       <h3 className="text-sm font-semibold text-fg">{saved.length} saved</h3>
                     </div>
                     <ul className="divide-y divide-line-subtle">
-                      {saved.map((j) => <JobRow key={jobKey(j)} job={j} skills={skills} saved onSave={toggleSave} />)}
+                      {saved.map((j) => (
+                        <JobRow key={jobKey(j)} job={j} skills={skills} saved onSave={toggleSave}
+                                draft={drafts[jobKey(j)]} onReachOut={openOutreach} />
+                      ))}
                     </ul>
                   </Card>
                 )
@@ -1758,6 +2116,12 @@ function App() {
         <AgentDock open={agentOpen} setOpen={setAgentOpen} plan={plan} loading={planLoading}
                    error={planError} jobs={jobs} onGenerate={buildPlan}
                    onClear={() => { setPlan(null); setPlanError(''); }} />
+      )}
+
+      {outreachJob && (
+        <OutreachModal job={outreachJob} draft={drafts[keyOf(outreachJob)]}
+                       loading={outreachLoading} error={outreachError}
+                       onClose={closeOutreach} onRetry={() => generateOutreach(outreachJob)} />
       )}
 
       <Toasts items={toasts} dismiss={dismiss} raised={showAgent} />

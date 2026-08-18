@@ -394,3 +394,69 @@ async def stats() -> dict:
         "avgScore": int(row["avg_score"]) if row.get("avg_score") is not None else None,
         "saved": int(row.get("saved") or 0),
     }
+
+
+# --------------------------- reach out ---------------------------
+
+def _outreach_out(row: dict) -> dict:
+    created = row.get("created_at")
+    return {
+        "id": row.get("id"),
+        "jobKey": row.get("job_key"),
+        "searchId": row.get("search_id"),
+        "at": created.isoformat() if created else None,
+        "company": row.get("company"),
+        "jobTitle": row.get("job_title"),
+        "employees": row.get("employees"),
+        "sizeBand": row.get("size_band"),
+        "confidence": row.get("confidence"),
+        "sizeBasis": row.get("size_basis"),
+        "target": row.get("target"),
+        "targetLabel": "Founder / CEO" if row.get("target") == "founder" else "HR / Recruiter",
+        "targetRole": row.get("target_role"),
+        "targetReason": row.get("target_why"),
+        "channel": row.get("channel"),
+        "subject": row.get("subject"),
+        "connectionNote": row.get("connection_note"),
+        "message": row.get("message"),
+        "followUp": row.get("follow_up"),
+        "searchUrl": row.get("search_url"),
+        "model": row.get("model"),
+    }
+
+
+async def save_outreach(*, search_id: int | None, job_key: str, draft: dict, usage: dict | None, model: str) -> int | None:
+    row = await db.fetch_one(
+        f"""
+        INSERT INTO {S}outreach (
+            search_id, job_key, company, job_title, employees, size_band, confidence, size_basis,
+            target, target_role, target_why, channel, subject, connection_note, message,
+            follow_up, search_url, model, usage
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (
+            search_id, job_key, draft.get("company"), draft.get("jobTitle"), draft.get("employees"),
+            draft.get("sizeBand"), draft.get("confidence"), draft.get("sizeBasis"),
+            draft.get("target"), draft.get("targetRole"), draft.get("targetReason"),
+            draft.get("channel"), draft.get("subject"), draft.get("connectionNote"),
+            draft.get("message"), draft.get("followUp"), draft.get("searchUrl"), model,
+            json.dumps(usage, default=str) if usage else None,
+        ),
+    )
+    return row["id"] if row else None
+
+
+async def list_outreach(search_id: int) -> dict[str, dict]:
+    """Ek search ke saare drafts, job_key se keyed — har job ka sabse naya wala."""
+    rows = await db.fetch_all(
+        f"""
+        SELECT DISTINCT ON (job_key) *
+          FROM {S}outreach
+         WHERE search_id = %s
+         ORDER BY job_key, created_at DESC
+        """,
+        (search_id,),
+    )
+    return {row["job_key"]: _outreach_out(row) for row in rows}

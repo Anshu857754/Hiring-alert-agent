@@ -32,6 +32,11 @@ PORT = int(os.getenv("PORT", "3000"))
 MIN_LIMIT = 10
 MAX_LIMIT = 30
 
+# Reach-out ka rule: itne se kam employees wali company me seedha founder ko
+# likho, usse badi me HR/recruiter ko. Company size na pata chale to HR —
+# bade organisation ke CEO ko DM karna ulta padta hai.
+FOUNDER_MAX_EMPLOYEES = int(os.getenv("FOUNDER_MAX_EMPLOYEES", "150"))
+
 # Apify credits ka mota-mota estimate — frontend pehle khud jodta tha,
 # ab ek hi jagah rehta hai taaki DB me likha hua kharcha bhi wahi ho.
 COST_PER_JOB = 0.0026

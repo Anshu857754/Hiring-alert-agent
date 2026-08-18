@@ -35,6 +35,7 @@ APIFY_API_KEY=apify_api_xxxxxxxxxxxx
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxx
 DATABASE_URL=postgresql://user:pass@host.neon.tech/neondb?sslmode=require
 APP_PASSWORD=          # khaali = app khuli. Public deploy par zaroor bharo
+FOUNDER_MAX_EMPLOYEES=150   # optional — isse chhoti company me founder, badi me HR
 ```
 
 `DATABASE_URL` na ho to app phir bhi chalti hai — bas history, shortlist aur
@@ -76,9 +77,10 @@ uvicorn app.main:app --reload --port 10000
 | `app/main.py` | FastAPI app. `POST /api/search` NDJSON stream, `POST /api/extract` file→text, `GET /api/health` |
 | `app/llm.py` | OpenRouter calls — `deepseek/deepseek-v4-pro`. Do kaam: JD parse karna + jobs ko score karna |
 | `app/apify.py` | Dono scrapers chalata hai, output normalize karta hai, duplicates hatata hai |
+| `app/outreach.py` | Founder-ya-HR ka rule + LinkedIn people-search link. Threshold `config.FOUNDER_MAX_EMPLOYEES` |
 | `app/docs.py` | markitdown wrapper — PDF/DOCX se text nikaalta hai (local, koi LLM call nahi) |
 | `app/db.py` | Postgres connection pool + migration runner (`migrations/*.sql`) |
-| `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, stats |
+| `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, outreach, stats |
 | `app/config.py` | `.env` load, limits, allowed file types, `DATABASE_URL`, `APP_PASSWORD` |
 | `app/auth.py` | Optional HTTP Basic password gate — `APP_PASSWORD` set ho tabhi lagta hai |
 | `migrate.py` | Migrations alag se chalane ka CLI |
@@ -98,6 +100,8 @@ uvicorn app.main:app --reload --port 10000
 | `POST /api/extract` | multipart `file` → `{ text, chars, words, filename }` |
 | `POST /api/search` | `{ jobDescription, limit, source, useAi }` → NDJSON stream (run DB me save hoti hai) |
 | `POST /api/recommend` | `{ profile, jobs, searchId }` → `{ plan, usage, model }` — skill gaps + 15/30 din ka plan |
+| `POST /api/outreach` | `{ job, profile, searchId }` → `{ draft, key, model }` — kis tak pahunchna hai + likha hua message |
+| `GET /api/outreach` | `?searchId=12` → us run ke saare drafts, `job_key` se keyed |
 | `GET /api/searches` | `?limit=25&all=false` → history list (DB se) |
 | `GET /api/searches/{id}` | Ek run poori wapas — JD, params, jobs aur plan |
 | `DELETE /api/searches/{id}` | Ek run hatao (jobs cascade ho jaati hain) |
@@ -138,6 +142,7 @@ Naam takraane se bachne ke liye hamari tables alag schema me banti hain.
 | `jobs` | Us run ki postings + `match_score` / `match_reason`. `(search_id, job_key)` unique |
 | `saved_jobs` | Shortlist. `job_key` (url) unique — ek posting do baar save nahi hoti |
 | `plans` | `/api/recommend` ka 15/30 din wala plan, search se juda hua |
+| `outreach` | Reach-out drafts — company size, founder/HR target, message. Append-only, latest padha jaata hai |
 | `schema_migrations` | Kaunsi migration lag chuki hai |
 
 Kuch cheezein jaan-boojh kar aise hain:
@@ -290,6 +295,37 @@ Resume ya profile JD box me daalo, search chalao, aur ye feature near-miss roles
 - Model ko **sirf un skills** ki ijaazat hai jo actually postings me likhi hain — invent nahi kar sakta. Aur jo role realistically 15/30 din me nahi khulega (jaise 10+ saal maangne wala Staff role) usse `notRealistic` me daalna padta hai, jhoota promise nahi
 
 Ek live run: **~10s, ~$0.0007** (1,419 tokens). Apify credits bilkul nahi lagte — ye poora OpenRouter par hai.
+
+### Reach out — founder ya HR (Contacts)
+
+Job mil gayi, ab uske andar kis insaan ko likhna hai? Rule seedha hai aur code
+me hai, model par nahi chhoda gaya (`app/outreach.py`):
+
+| Company size | Kis tak jaana hai |
+|---|---|
+| `< FOUNDER_MAX_EMPLOYEES` (default **150**) | **Founder / CEO** — itni chhoti team me inbound founder khud padhta hai |
+| `>= 150` | **HR / Recruiter** — is size par hiring TA team ke through hi chalti hai |
+| size pata hi nahi chali | **HR** — bade organisation ke CEO ko DM karna ulta padta hai, isliye safer route |
+
+- Har pipeline row par **Reach out** button. Dabate hi model (a) company kitni
+  badi hai estimate karta hai, (b) usi hisaab se message likhta hai. Founder wala
+  note aur HR wala note ek jaise nahi hote — founder ko *tumhare kaam se kya
+  banega* chahiye, HR ko *requirements se kitna match karte ho*
+- Faisla model ka nahi hai. Model sirf employees ka number deta hai; founder/HR
+  `decide_target()` tay karta hai. Model ne kisi aur ko address kar diya to draft
+  par saaf warning aati hai
+- Draft me: target chip + wajah, size estimate aur uski confidence, **subject**,
+  poora **message**, **LinkedIn connection note** (300 char limit ke saath), aur
+  **follow-up** line — har block par copy button
+- **Contact details nahi nikaale jaate.** Us company ke founder/recruiter ka
+  ready-made LinkedIn people-search link milta hai — kis par click karna hai wo
+  tum decide karte ho
+- Sidebar me **Contacts** view — jitne drafts bane hain sab ek jagah, *All /
+  Founders / HR* tabs ke saath. Drafts `outreach` table me search ke saath jude
+  rehte hain, isliye purani run kholne par wapas aa jaate hain
+- Message tumhare resume/profile se likha jaata hai (wahi text jo JD box me hai),
+  isliye kam se kam 20 characters chahiye. Ek job ka draft ek hi baar banta hai —
+  dobara chahiye to modal me **Redraft**
 
 ---
 
