@@ -35,6 +35,7 @@ APIFY_API_KEY=apify_api_xxxxxxxxxxxx
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxx
 DATABASE_URL=postgresql://user:pass@host.neon.tech/neondb?sslmode=require
 APP_PASSWORD=          # khaali = app khuli. Public deploy par zaroor bharo
+FOUNDER_MAX_EMPLOYEES=150   # optional — isse chhoti company me founder, badi me HR
 ```
 
 `DATABASE_URL` na ho to app phir bhi chalti hai — bas history, shortlist aur
@@ -76,9 +77,10 @@ uvicorn app.main:app --reload --port 10000
 | `app/main.py` | FastAPI app. `POST /api/search` NDJSON stream, `POST /api/extract` file→text, `GET /api/health` |
 | `app/llm.py` | OpenRouter calls — `deepseek/deepseek-v4-pro`. Do kaam: JD parse karna + jobs ko score karna |
 | `app/apify.py` | Dono scrapers chalata hai, output normalize karta hai, duplicates hatata hai |
+| `app/outreach.py` | Founder-ya-HR ka rule + LinkedIn people-search link. Threshold `config.FOUNDER_MAX_EMPLOYEES` |
 | `app/docs.py` | markitdown wrapper — PDF/DOCX se text nikaalta hai (local, koi LLM call nahi) |
 | `app/db.py` | Postgres connection pool + migration runner (`migrations/*.sql`) |
-| `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, stats |
+| `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, outreach, stats |
 | `app/config.py` | `.env` load, limits, allowed file types, `DATABASE_URL`, `APP_PASSWORD` |
 | `app/auth.py` | Optional HTTP Basic password gate — `APP_PASSWORD` set ho tabhi lagta hai |
 | `migrate.py` | Migrations alag se chalane ka CLI |
@@ -96,8 +98,10 @@ uvicorn app.main:app --reload --port 10000
 |---|---|
 | `GET /api/health` | model name + `.env` me keys hain ya nahi + DB status |
 | `POST /api/extract` | multipart `file` → `{ text, chars, words, filename }` |
-| `POST /api/search` | `{ jobDescription, limit, source, useAi }` → NDJSON stream (run DB me save hoti hai) |
+| `POST /api/search` | `{ jobDescription, limit, source, useAi, titleOverride }` → NDJSON stream (run DB me save hoti hai). `titleOverride` set ho to wahi scrape keyword banta hai, model ka guess nahi |
 | `POST /api/recommend` | `{ profile, jobs, searchId }` → `{ plan, usage, model }` — skill gaps + 15/30 din ka plan |
+| `POST /api/outreach` | `{ job, profile, searchId }` → `{ draft, key, model }` — kis tak pahunchna hai + likha hua message |
+| `GET /api/outreach` | `?searchId=12` → us run ke saare drafts, `job_key` se keyed |
 | `GET /api/searches` | `?limit=25&all=false` → history list (DB se) |
 | `GET /api/searches/{id}` | Ek run poori wapas — JD, params, jobs aur plan |
 | `DELETE /api/searches/{id}` | Ek run hatao (jobs cascade ho jaati hain) |
@@ -138,6 +142,7 @@ Naam takraane se bachne ke liye hamari tables alag schema me banti hain.
 | `jobs` | Us run ki postings + `match_score` / `match_reason`. `(search_id, job_key)` unique |
 | `saved_jobs` | Shortlist. `job_key` (url) unique — ek posting do baar save nahi hoti |
 | `plans` | `/api/recommend` ka 15/30 din wala plan, search se juda hua |
+| `outreach` | Reach-out drafts — company size, founder/HR target, message. Append-only, latest padha jaata hai |
 | `schema_migrations` | Kaunsi migration lag chuki hai |
 
 Kuch cheezein jaan-boojh kar aise hain:
@@ -211,6 +216,11 @@ markitdown blocking library hai, isliye use `asyncio.to_thread` me chalate hain 
 
 ## Design system
 
+> **Note (RAYN.AI redesign):** UI ab dark-first hai — canvas `#0B0F17`, cards `#111625` + `border-white/10`,
+> accent indigo→violet gradient, active/enabled ke liye emerald `#10B981`. Token *structure* neeche wali
+> hi hai (wahi naam, wahi Tailwind mapping), par values badal gayi hain aur ab dark default hai.
+> Neeche ke contrast numbers purane cream/near-black palette ke hain — unhe dobara measure karna baaki hai.
+
 Saare colors **CSS custom properties** hain, `public/index.html` ke `<style>` block me — ek `:root[data-theme='light']` aur ek `:root[data-theme='dark']`. Tailwind ki har color utility inhi tokens par map hoti hai (`bg-surface`, `text-fg-muted`, `border-line`, `bg-brand-subtle`...), isliye component me koi raw hex nahi hai aur theme badalne par kuch peeche nahi chhootta.
 
 **Brand: deep indigo** (`#4F46E5` light / `#818CF8` dark), electric-blue family ke saath. Indigo sirf in jagah reserved hai: primary CTA, active navigation, focus states, selected states, aur section indicators. Baaki UI neutral slate par chalti hai — product colorful nahi, **contrast-driven** hai.
@@ -263,6 +273,12 @@ Header me day/night switch (☀ / ☾) — thumb slide karta hai, active side ka
 
 ## UI
 
+> **Note (RAYN.AI redesign):** shell wahi hai, par nav ab 8 items ka hai — Overview, New Search, Pipeline,
+> Talent Pool, Saved Matches, Outreach, Analytics, Settings — sidebar collapse hota hai, top bar me
+> ⌘K command palette + model pill + credits meter hai, aur New Search ke teen numbered steps ki jagah ab
+> **AI Prompt Studio** (3 tabs) + **bento configuration** (2 cards) + **floating glass action dock** hai.
+> Neeche wala step-by-step description purane layout ka hai.
+
 SaaS app shell hai — left sidebar + top header + scrollable content. Main workflow ek hi page par 3 numbered steps me hai: **JD → configuration → pipeline**.
 
 ### New Search (main workflow)
@@ -290,6 +306,37 @@ Resume ya profile JD box me daalo, search chalao, aur ye feature near-miss roles
 - Model ko **sirf un skills** ki ijaazat hai jo actually postings me likhi hain — invent nahi kar sakta. Aur jo role realistically 15/30 din me nahi khulega (jaise 10+ saal maangne wala Staff role) usse `notRealistic` me daalna padta hai, jhoota promise nahi
 
 Ek live run: **~10s, ~$0.0007** (1,419 tokens). Apify credits bilkul nahi lagte — ye poora OpenRouter par hai.
+
+### Reach out — founder ya HR (Contacts)
+
+Job mil gayi, ab uske andar kis insaan ko likhna hai? Rule seedha hai aur code
+me hai, model par nahi chhoda gaya (`app/outreach.py`):
+
+| Company size | Kis tak jaana hai |
+|---|---|
+| `< FOUNDER_MAX_EMPLOYEES` (default **150**) | **Founder / CEO** — itni chhoti team me inbound founder khud padhta hai |
+| `>= 150` | **HR / Recruiter** — is size par hiring TA team ke through hi chalti hai |
+| size pata hi nahi chali | **HR** — bade organisation ke CEO ko DM karna ulta padta hai, isliye safer route |
+
+- Har pipeline row par **Reach out** button. Dabate hi model (a) company kitni
+  badi hai estimate karta hai, (b) usi hisaab se message likhta hai. Founder wala
+  note aur HR wala note ek jaise nahi hote — founder ko *tumhare kaam se kya
+  banega* chahiye, HR ko *requirements se kitna match karte ho*
+- Faisla model ka nahi hai. Model sirf employees ka number deta hai; founder/HR
+  `decide_target()` tay karta hai. Model ne kisi aur ko address kar diya to draft
+  par saaf warning aati hai
+- Draft me: target chip + wajah, size estimate aur uski confidence, **subject**,
+  poora **message**, **LinkedIn connection note** (300 char limit ke saath), aur
+  **follow-up** line — har block par copy button
+- **Contact details nahi nikaale jaate.** Us company ke founder/recruiter ka
+  ready-made LinkedIn people-search link milta hai — kis par click karna hai wo
+  tum decide karte ho
+- Sidebar me **Contacts** view — jitne drafts bane hain sab ek jagah, *All /
+  Founders / HR* tabs ke saath. Drafts `outreach` table me search ke saath jude
+  rehte hain, isliye purani run kholne par wapas aa jaate hain
+- Message tumhare resume/profile se likha jaata hai (wahi text jo JD box me hai),
+  isliye kam se kam 20 characters chahiye. Ek job ka draft ek hi baar banta hai —
+  dobara chahiye to modal me **Redraft**
 
 ---
 

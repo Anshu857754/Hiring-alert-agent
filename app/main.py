@@ -10,10 +10,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, db, docs, store
+from . import config, db, docs, outreach, store
 from .auth import BasicAuth
 from .apify import scrape_jobs
-from .llm import MODEL_ID, build_learning_plan, extract_search_params, score_jobs
+from .llm import MODEL_ID, build_learning_plan, draft_outreach, extract_search_params, score_jobs
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
 log = logging.getLogger("hiring-agent")
@@ -43,6 +43,9 @@ class SearchRequest(BaseModel):
     limit: int = config.MIN_LIMIT
     source: Literal["both", "linkedin", "indeed"] = "both"
     useAi: bool = True
+    # UI ka "Target role" field + seniority prefix. Set ho to LLM ka nikala
+    # hua title ignore karke yahi keyword scrape hota hai.
+    titleOverride: str | None = None
     # Chhote batches parallel me chalte hain, to wall-clock time sabse dheeme
     # single call se bandha hota hai — 10 par wo call 15 se choti hoti hai.
     batchSize: int = Field(default=10, ge=5, le=30)
@@ -56,6 +59,12 @@ class RecommendRequest(BaseModel):
 
 class SaveRequest(BaseModel):
     job: dict = Field(default_factory=dict)
+    searchId: int | None = None
+
+
+class OutreachRequest(BaseModel):
+    job: dict = Field(default_factory=dict)
+    profile: str = ""
     searchId: int | None = None
 
 
@@ -186,15 +195,22 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
 
             params = {"title": None, "location": "India", "country": "IN", "summary": "", "mustHaveSkills": []}
 
+            override = (req.titleOverride or "").strip()
+
             if req.useAi:
                 await progress("parse", f"{MODEL_ID} is reading the job description...")
                 extracted = await extract_search_params(job_description, config.OPENROUTER_API_KEY)
                 params = extracted["params"]
-                await progress("parse", f"Search built: \"{params['title']}\" in {params['location']} ({params['country']})")
             else:
                 # AI off ho to JD ki pehli line ko hi search keyword maan lete hain.
                 params["title"] = job_description.split("\n")[0].strip()[:60]
-                await progress("parse", f"AI off — keyword: \"{params['title']}\"")
+
+            # User ka apna title hamesha jeetta hai — model ka guess uske upar
+            # nahi chadhta. Location aur skills waise hi rehte hain.
+            if override:
+                params["title"] = override[:80]
+
+            await progress("parse", f"Search built: \"{params['title']}\" in {params['location']} ({params['country']})")
 
             await send({"type": "params", "params": params, "limit": limit})
 
@@ -279,6 +295,49 @@ def _background(coro) -> None:
     task = asyncio.create_task(coro)
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
+
+
+# ─────────────────────────── reach out ───────────────────────────
+
+@app.post("/api/outreach")
+async def outreach_draft(req: OutreachRequest) -> JSONResponse:
+    """Ek posting ke liye reach-out draft — chhoti company me founder, badi me HR."""
+    profile = (req.profile or "").strip()
+
+    if not req.job or not (req.job.get("title") or req.job.get("company")):
+        return JSONResponse({"error": "No job supplied"}, status_code=400)
+    if len(profile) < 20:
+        return JSONResponse({"error": "Add your resume or profile first (at least 20 characters)"}, status_code=400)
+    if not config.OPENROUTER_API_KEY:
+        return JSONResponse({"error": "OPENROUTER_API_KEY not found in .env"}, status_code=500)
+
+    try:
+        result = await draft_outreach(req.job, profile, config.OPENROUTER_API_KEY,
+                                      threshold=config.FOUNDER_MAX_EMPLOYEES)
+    except Exception as err:
+        return JSONResponse({"error": f"Could not draft the message: {err}"}, status_code=502)
+
+    # Founder-ya-HR ka faisla model ka nahi, hamara rule hai.
+    draft = outreach.finalize(result["draft"], req.job)
+
+    try:
+        await store.save_outreach(
+            search_id=req.searchId,
+            job_key=store.job_key(req.job),
+            draft=draft,
+            usage=result.get("usage"),
+            model=MODEL_ID,
+        )
+    except Exception as err:
+        log.warning("outreach draft could not be saved: %s", err)
+
+    return JSONResponse({"draft": draft, "key": store.job_key(req.job), "model": MODEL_ID})
+
+
+@app.get("/api/outreach")
+async def outreach_for_search(searchId: int) -> JSONResponse:
+    """Purani search kholne par uske saare drafts wapas."""
+    return JSONResponse({"drafts": await store.list_outreach(searchId)})
 
 
 # ─────────────────────────── history (DB) ───────────────────────────
