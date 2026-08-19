@@ -98,7 +98,7 @@ uvicorn app.main:app --reload --port 10000
 |---|---|
 | `GET /api/health` | model name + `.env` me keys hain ya nahi + DB status |
 | `POST /api/extract` | multipart `file` → `{ text, chars, words, filename }` |
-| `POST /api/search` | `{ jobDescription, limit, source, useAi }` → NDJSON stream (run DB me save hoti hai) |
+| `POST /api/search` | `{ jobDescription, limit, source, useAi, titleOverride }` → NDJSON stream (run DB me save hoti hai). `titleOverride` set ho to wahi scrape keyword banta hai, model ka guess nahi |
 | `POST /api/recommend` | `{ profile, jobs, searchId }` → `{ plan, usage, model }` — skill gaps + 15/30 din ka plan |
 | `POST /api/outreach` | `{ job, profile, searchId }` → `{ draft, key, model }` — kis tak pahunchna hai + likha hua message |
 | `GET /api/outreach` | `?searchId=12` → us run ke saare drafts, `job_key` se keyed |
@@ -216,6 +216,11 @@ markitdown blocking library hai, isliye use `asyncio.to_thread` me chalate hain 
 
 ## Design system
 
+> **Note (RAYN.AI redesign):** UI ab dark-first hai — canvas `#0B0F17`, cards `#111625` + `border-white/10`,
+> accent indigo→violet gradient, active/enabled ke liye emerald `#10B981`. Token *structure* neeche wali
+> hi hai (wahi naam, wahi Tailwind mapping), par values badal gayi hain aur ab dark default hai.
+> Neeche ke contrast numbers purane cream/near-black palette ke hain — unhe dobara measure karna baaki hai.
+
 Saare colors **CSS custom properties** hain, `public/index.html` ke `<style>` block me — ek `:root[data-theme='light']` aur ek `:root[data-theme='dark']`. Tailwind ki har color utility inhi tokens par map hoti hai (`bg-surface`, `text-fg-muted`, `border-line`, `bg-brand-subtle`...), isliye component me koi raw hex nahi hai aur theme badalne par kuch peeche nahi chhootta.
 
 **Brand: deep indigo** (`#4F46E5` light / `#818CF8` dark), electric-blue family ke saath. Indigo sirf in jagah reserved hai: primary CTA, active navigation, focus states, selected states, aur section indicators. Baaki UI neutral slate par chalti hai — product colorful nahi, **contrast-driven** hai.
@@ -267,6 +272,12 @@ Header me day/night switch (☀ / ☾) — thumb slide karta hai, active side ka
 ---
 
 ## UI
+
+> **Note (RAYN.AI redesign):** shell wahi hai, par nav ab 8 items ka hai — Overview, New Search, Pipeline,
+> Talent Pool, Saved Matches, Outreach, Analytics, Settings — sidebar collapse hota hai, top bar me
+> ⌘K command palette + model pill + credits meter hai, aur New Search ke teen numbered steps ki jagah ab
+> **AI Prompt Studio** (3 tabs) + **bento configuration** (2 cards) + **floating glass action dock** hai.
+> Neeche wala step-by-step description purane layout ka hai.
 
 SaaS app shell hai — left sidebar + top header + scrollable content. Main workflow ek hi page par 3 numbered steps me hai: **JD → configuration → pipeline**.
 

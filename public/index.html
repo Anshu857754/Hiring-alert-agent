@@ -12,145 +12,163 @@
 <!-- theme paint se pehle set hota hai taaki flash na ho -->
 <script>
   (function () {
-    var mode = 'light';
+    // RAYN.AI dark-first hai — light tabhi jab user ne khud choose kiya ho.
+    var mode = 'dark';
     try {
-      // Value JSON ke roop me store hoti hai ('"dark"'), isliye parse zaroori hai —
-      // raw padhne se data-theme='"dark"' ban jaata tha aur koi selector match hi nahi karta tha.
+      // Value JSON ke roop me store hoti hai ('"dark"'), isliye parse zaroori hai.
       var raw = localStorage.getItem('ha.theme');
       var saved = null;
       if (raw) { try { saved = JSON.parse(raw); } catch (e) { saved = raw; } }
       if (saved !== 'light' && saved !== 'dark') saved = null;
-      mode = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    } catch (e) { /* localStorage blocked — light hi rahega */ }
+      mode = saved || 'dark';
+    } catch (e) { /* localStorage blocked — dark hi rahega */ }
     document.documentElement.setAttribute('data-theme', mode);
   })();
 </script>
 
 <style>
 /* ═══════════════════════════════════════════════════════════════
-   DESIGN TOKENS
+   RAYN.AI — DESIGN TOKENS
    Har surface, border, text aur semantic color yahin define hota hai.
    Components sirf inhi tokens ko use karte hain — koi raw hex nahi.
+   Dark canvas primary hai; light ek clean slate variant hai.
    ═══════════════════════════════════════════════════════════════ */
 
-/* Light default bare :root par hai — agar data-theme kabhi missing ya galat ho
-   to bhi page tokenless (colorless) nahi ho sakta. Dark isse override karta hai. */
+/* Light bare :root par hai — data-theme kabhi missing ho to bhi page
+   colorless nahi ho sakta. Dark neeche isse override karta hai. */
 :root {
   color-scheme: light;
 
-  /* — backgrounds: app tinted, sidebar/cards pure white. separation
-       borders se aati hai, heavy shadows se nahi — */
-  /* Warm cream neutrals — cold gray ki jagah, taaki UI thodi soft lage.
-     Rang sirf accent ke liye. */
-  --bg-app:           #F7F4EF;
-  --bg-sidebar:       #FFFDFA;
+  /* — canvas + surfaces — */
+  --bg-app:           #F8FAFC;
+  --bg-sidebar:       rgba(255, 255, 255, .85);
   --surface:          #FFFFFF;
   --surface-elev:     #FFFFFF;
-  --surface-hover:    #F5F1EA;
-  --surface-sunken:   #FAF7F2;
-  --surface-selected: #EEEDFF;
+  --surface-hover:    #F1F5F9;
+  --surface-sunken:   #F8FAFC;
+  --surface-selected: #EEF0FF;
   --input-bg:         #FFFFFF;
+  /* glass = dock, top bar aur studio card. Ambient light inke peeche se
+     dikhti hai, isliye ye rgba hain — opaque surface nahi. */
+  --glass:            rgba(255, 255, 255, .92);
+  --glass-strong:     rgba(255, 255, 255, .97);
 
-  /* — borders structure carry karti hain, isliye clearly visible — */
-  --border-subtle:    #F0EBE3;
-  --border:           #E4DDD2;
-  --border-strong:    #CFC5B7;
-  /* toggle-off aur unchecked checkbox ka ekmatra visual boundary —
+  /* — borders structure carry karti hain — */
+  --border-subtle:    rgba(226, 232, 240, .60);
+  --border:           rgba(226, 232, 240, .80);
+  --border-strong:    #CBD5E1;
+  /* toggle-off / unchecked checkbox ka ekmatra visual boundary —
      WCAG 1.4.11 ke liye 3:1 chahiye, isliye alag token */
-  --border-control:   #78706A;
+  --border-control:   #94A3B8;
 
   /* — text (contrast measured against --surface #FFFFFF) — */
-  --text-primary:     #1C1917;
-  --text-strong:      #3A342F;
-  --text-secondary:   #57534E;
-  --text-muted:       #6E6862;
-  --text-disabled:    #A8A29E;   /* disabled — WCAG exempt */
+  --text-primary:     #0F172A;
+  --text-strong:      #1E293B;
+  --text-secondary:   #475569;
+  --text-muted:       #64748B;
+  --text-disabled:    #94A3B8;   /* disabled — WCAG exempt */
   --text-inverse:     #FFFFFF;
 
-  /* — brand: deep indigo. intelligence + precision + trust — */
+  /* — brand: electric indigo — */
   --brand:            #4F46E5;
   --brand-hover:      #4338CA;
   --brand-active:     #3730A3;
-  --brand-subtle:     #EEEDFF;
-  --brand-border:     #C9C7FB;
+  --brand-subtle:     #EEF0FF;
+  --brand-border:     #C7CBFB;
   --brand-text:       #4338CA;   /* text/icon weight on light surfaces */
   --brand-on:         #FFFFFF;   /* label that sits on --brand */
+
+  /* — accent gradient: indigo → violet → indigo — */
+  --accent-from:      #6366F1;
+  --accent-via:       #A855F7;
+  --accent-to:        #4F46E5;
+  --glow:             rgba(99, 102, 241, .30);
+
+  /* Ambient light — ellipse at top, violet/indigo. Body ke peeche paint
+     hoti hai; app shell transparent rehta hai taaki ye dikhe. */
+  --ambient:
+    radial-gradient(1100px 620px at 50% -18%, rgba(99, 102, 241, .16), transparent 62%),
+    radial-gradient(760px 460px at 88% 2%, rgba(168, 85, 247, .10), transparent 64%);
 
   /* — semantic: base = fill/indicator (3:1), text = readable variant (4.5:1) — */
   --success:          #059669;  --success-subtle: #ECFDF5;  --success-border: #A7F3D0;  --success-text: #047857;
   --warning:          #D97706;  --warning-subtle: #FFFBEB;  --warning-border: #FDE68A;  --warning-text: #B45309;
   --error:            #DC2626;  --error-subtle:   #FEF2F2;  --error-border:   #FECACA;  --error-text:   #B91C1C;
   --info:             #2563EB;  --info-subtle:    #EFF6FF;  --info-border:    #BFDBFE;  --info-text:    #1D4ED8;
-  --neutral-subtle:   #F2EEE7;  --neutral-border: #E4DDD2;  --neutral-fill:   #A8A29E;
+  --neutral-subtle:   #F1F5F9;  --neutral-border: #E2E8F0;  --neutral-fill:   #94A3B8;
 
-  --focus-ring:       #4F46E5;
-  --focus-halo:       rgba(79, 70, 229, .20);
+  --focus-ring:       #6366F1;
+  --focus-halo:       rgba(99, 102, 241, .22);
 
-  /* — elevation: warm shadow, cream ke saath neutral grey ganda lagta hai.
-       Teen layers — contact, spread, aur ek chaudi ambient — taaki cards
-       sach me utthe hue lagein, sirf outline na dikhein. */
-  --shadow-sm: 0 1px 2px rgba(41, 33, 24, .10), 0 2px 4px -1px rgba(41, 33, 24, .07);
-  --shadow-md: 0 2px 4px rgba(41, 33, 24, .08), 0 10px 22px -6px rgba(41, 33, 24, .20), 0 24px 48px -24px rgba(41, 33, 24, .18);
-  --shadow-lg: 0 4px 8px rgba(41, 33, 24, .10), 0 18px 40px -10px rgba(41, 33, 24, .30), 0 40px 72px -36px rgba(41, 33, 24, .26);
-  --overlay:   rgba(28, 25, 23, .40);
-  --skeleton:  #EBE5DC;
-  --skeleton-hi: #F7F4EF;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, .05);
+  --shadow-md: 0 1px 3px rgba(15, 23, 42, .07), 0 1px 2px -1px rgba(15, 23, 42, .05);
+  --shadow-lg: 0 4px 12px -2px rgba(15, 23, 42, .08), 0 2px 6px -2px rgba(15, 23, 42, .05);
+  --overlay:   rgba(15, 23, 42, .40);
+  --skeleton:  #E9EEF5;
+  --skeleton-hi: #F8FAFC;
 }
 
+/* ── Deep midnight slate. Structure borders se aati hai, luminance jump se nahi. ── */
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  /* — deep navy-charcoal, pure black nahi. har level distinguishable — */
-  /* Near-black neutral canvas. Cards sirf halka sa upar hain — structure
-     borders se aati hai, badi luminance jump se nahi (wo gray slabs bana deti hai). */
-  --bg-app:           #0B0A09;
-  --bg-sidebar:       #100E0C;
-  --surface:          #1A1815;
-  --surface-elev:     #24211C;
-  --surface-hover:    #221F1B;
-  --surface-sunken:   #121110;
-  --surface-selected: #201E33;
-  --input-bg:         #121110;
+  --bg-app:           #0C0C0F;
+  --bg-sidebar:       rgba(8, 8, 10, .78);
+  --surface:          #151518;
+  --surface-elev:     #1A1A1E;
+  --surface-hover:    #1D1D21;
+  --surface-sunken:   #101013;
+  --surface-selected: rgba(99, 102, 241, .12);
+  --input-bg:         #101013;
+  --glass:            rgba(21, 21, 24, .80);
+  --glass-strong:     rgba(21, 21, 24, .93);
 
-  /* — borders yahan asli structure hain, isliye clearly readable — */
-  --border-subtle:    #272420;
-  --border:           #4A443E;
-  --border-strong:    #625B53;
-  --border-control:   #928B83;
+  /* white/10 family — spec ke hisaab se hairline borders */
+  --border-subtle:    rgba(255, 255, 255, .05);
+  --border:           rgba(255, 255, 255, .08);
+  --border-strong:    rgba(255, 255, 255, .16);
+  --border-control:   rgba(255, 255, 255, .30);
 
-  /* — text (contrast measured against --surface #1A1815) — */
-  --text-primary:     #FAFAF9;
-  --text-strong:      #E7E5E4;
-  --text-secondary:   #A8A29E;
-  --text-muted:       #8E8781;
-  --text-disabled:    #5C5650;
-  --text-inverse:     #0B0A09;
+  /* — text (contrast measured against --surface #111625) — */
+  --text-primary:     #FAFAFA;
+  --text-strong:      #E4E4E7;
+  --text-secondary:   #A9A9B2;
+  --text-muted:       #8B8B94;
+  --text-disabled:    #52525B;
+  --text-inverse:     #0C0C0F;
 
-  /* — brand: electric indigo, bright fill carries a near-black label — */
-  --brand:            #7A85FF;
-  --brand-hover:      #949CFF;
-  --brand-active:     #B4B9FF;
-  --brand-subtle:     #201E33;
-  --brand-border:     #3E3C7E;
-  --brand-text:       #A5ABFF;
-  --brand-on:         #0B0A09;
+  --brand:            #6366F1;
+  --brand-hover:      #818CF8;
+  --brand-active:     #A5B4FC;
+  --brand-subtle:     rgba(99, 102, 241, .14);
+  --brand-border:     rgba(129, 140, 248, .38);
+  --brand-text:       #A5B4FC;
+  --brand-on:         #FFFFFF;
 
-  /* — semantic — */
-  --success:          #3ECF8E;  --success-subtle: #0C2018;  --success-border: #1B4634;  --success-text: #6EE7B7;
-  --warning:          #F5B33C;  --warning-subtle: #241B08;  --warning-border: #4A3712;  --warning-text: #FBCF6B;
-  --error:            #F0655B;  --error-subtle:   #26100F;  --error-border:   #5A211D;  --error-text:   #FCA5A5;
-  --info:             #5B9DF9;  --info-subtle:    #0E1A2B;  --info-border:    #1E3A5C;  --info-text:    #93C5FD;
-  --neutral-subtle:   #24211C;  --neutral-border: #4A443E;  --neutral-fill:   #57534E;
+  --accent-from:      #6366F1;
+  --accent-via:       #A855F7;
+  --accent-to:        #4F46E5;
+  --glow:             rgba(99, 102, 241, .45);
 
-  --focus-ring:       #7A85FF;
-  --focus-halo:       rgba(122, 133, 255, .26);
+  --ambient:
+    radial-gradient(1100px 640px at 50% -18%, rgba(99, 102, 241, .10), transparent 64%),
+    radial-gradient(900px 520px at 84% 2%, rgba(255, 255, 255, .025), transparent 68%);
+
+  --success:          #10B981;  --success-subtle: rgba(16, 185, 129, .12);  --success-border: rgba(16, 185, 129, .34);  --success-text: #34D399;
+  --warning:          #F59E0B;  --warning-subtle: rgba(245, 158, 11, .12);  --warning-border: rgba(245, 158, 11, .32);  --warning-text: #FBBF24;
+  --error:            #F43F5E;  --error-subtle:   rgba(244, 63, 94, .12);   --error-border:   rgba(244, 63, 94, .32);   --error-text:   #FB7185;
+  --info:             #38BDF8;  --info-subtle:    rgba(56, 189, 248, .12);  --info-border:    rgba(56, 189, 248, .30);  --info-text:    #7DD3FC;
+  --neutral-subtle:   rgba(255, 255, 255, .05);  --neutral-border: rgba(255, 255, 255, .09);  --neutral-fill: #52525B;
+
+  --focus-ring:       #818CF8;
+  --focus-halo:       rgba(99, 102, 241, .32);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .55), 0 2px 4px -1px rgba(0, 0, 0, .40);
   --shadow-md: 0 2px 4px rgba(0, 0, 0, .45), 0 10px 22px -6px rgba(0, 0, 0, .60), 0 24px 48px -24px rgba(0, 0, 0, .55);
   --shadow-lg: 0 4px 8px rgba(0, 0, 0, .50), 0 18px 40px -10px rgba(0, 0, 0, .70), 0 40px 72px -36px rgba(0, 0, 0, .60);
-  --overlay:   rgba(2, 6, 23, .70);
-  --skeleton:  #24211C;
-  --skeleton-hi: #322D27;
+  --overlay:   rgba(0, 0, 0, .74);
+  --skeleton:  rgba(255, 255, 255, .05);
+  --skeleton-hi: rgba(255, 255, 255, .11);
 }
 
 html, body, #root { height: 100%; }
@@ -161,12 +179,40 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Ambient violet/indigo wash — fixed layer, app shell iske upar transparent
+   baithta hai. pointer-events none taaki clicks pass ho jaayein. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--ambient);
+}
+
 /* theme switch ke waqt bade surfaces ko halka cross-fade */
 body, .themed { transition: background-color .18s ease, border-color .18s ease, color .18s ease; }
 
-/* Scrollbar bhi tokens par — default gray cream palette se alag lagta hai.
-   Thumb par 4px transparent border hai jo content-box clip ke saath
-   padding ka kaam karta hai, isliye wo patli aur rounded dikhti hai. */
+/* Accent helpers — gradient ek hi jagah define hai, teeno stops tokens se. */
+.accent-grad { background-image: linear-gradient(135deg, var(--accent-from), var(--accent-via), var(--accent-to)); }
+.accent-text {
+  background-image: linear-gradient(120deg, var(--accent-from), var(--accent-via));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+/* Primary CTA ka dheema saans — halka, taaki dhyan khiche par chubhe na. */
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 10px 30px -12px var(--glow), 0 0 0 0 rgba(99, 102, 241, 0); }
+  50%      { box-shadow: 0 16px 44px -10px var(--glow), 0 0 0 5px rgba(99, 102, 241, .10); }
+}
+.glow-pulse { animation: glowPulse 3s ease-in-out infinite; }
+
+/* Card hover par border ka halka roshan hona — sirf border, koi lift nahi. */
+.glow-border { transition: border-color .2s ease, box-shadow .2s ease; }
+.glow-border:hover { border-color: var(--brand-border); box-shadow: 0 0 0 1px var(--brand-subtle), 0 18px 40px -28px var(--glow); }
+
+/* Scrollbar bhi tokens par. Thumb par 4px transparent border content-box clip
+   ke saath padding ka kaam karta hai, isliye wo patli aur rounded dikhti hai. */
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
 ::-webkit-scrollbar { width: 14px; height: 14px; }
@@ -199,6 +245,43 @@ body, .themed { transition: background-color .18s ease, border-color .18s ease, 
   background: var(--brand); border-radius: 999px; animation: barSlide 1.3s ease-in-out infinite;
 }
 
+/* Range input ko tokens par laana padta hai — native accent theme follow
+   nahi karta. Track aur thumb dono explicitly paint hote hain. */
+input[type='range'].rayn-range {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 20px; background: transparent; cursor: pointer;
+}
+input[type='range'].rayn-range::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-from) 0%, var(--accent-via) var(--fill, 50%), var(--border-strong) var(--fill, 50%));
+}
+input[type='range'].rayn-range::-moz-range-track { height: 4px; border-radius: 999px; background: var(--border-strong); }
+input[type='range'].rayn-range::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--accent-from); }
+input[type='range'].rayn-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  margin-top: -6px; height: 16px; width: 16px; border-radius: 999px;
+  background: #FFFFFF; border: 3px solid var(--brand);
+  box-shadow: 0 2px 8px -2px var(--glow);
+}
+input[type='range'].rayn-range::-moz-range-thumb {
+  height: 16px; width: 16px; border: 3px solid var(--brand); border-radius: 999px;
+  background: #FFFFFF; box-shadow: 0 2px 8px -2px var(--glow);
+}
+input[type='range'].rayn-range:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; border-radius: 999px; }
+
+/* Prompt textarea ki apni scrollbar - page wali se patli aur halki,
+   taaki likhte waqt dhyan na kheeche. */
+.sleek-scroll { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.sleek-scroll::-webkit-scrollbar { width: 8px; }
+.sleek-scroll::-webkit-scrollbar-track { background: transparent; }
+.sleek-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.sleek-scroll::-webkit-scrollbar-thumb:hover { background-color: var(--text-disabled); background-clip: content-box; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
@@ -226,11 +309,13 @@ body, .themed { transition: background-color .18s ease, border-color .18s ease, 
         colors: {
           app:      'var(--bg-app)',
           sidebar:  'var(--bg-sidebar)',
+          glass:    { DEFAULT: 'var(--glass)', strong: 'var(--glass-strong)' },
           surface:  { DEFAULT: 'var(--surface)', elev: 'var(--surface-elev)', hover: 'var(--surface-hover)', sunken: 'var(--surface-sunken)', selected: 'var(--surface-selected)' },
           input:    'var(--input-bg)',
           line:     { subtle: 'var(--border-subtle)', DEFAULT: 'var(--border)', strong: 'var(--border-strong)', control: 'var(--border-control)' },
           fg:       { DEFAULT: 'var(--text-primary)', strong: 'var(--text-strong)', sec: 'var(--text-secondary)', muted: 'var(--text-muted)', disabled: 'var(--text-disabled)', inv: 'var(--text-inverse)' },
           brand:    { DEFAULT: 'var(--brand)', hover: 'var(--brand-hover)', active: 'var(--brand-active)', subtle: 'var(--brand-subtle)', border: 'var(--brand-border)', text: 'var(--brand-text)', on: 'var(--brand-on)' },
+          accent:   { from: 'var(--accent-from)', via: 'var(--accent-via)', to: 'var(--accent-to)' },
           success:  { DEFAULT: 'var(--success)', subtle: 'var(--success-subtle)', border: 'var(--success-border)', text: 'var(--success-text)' },
           warning:  { DEFAULT: 'var(--warning)', subtle: 'var(--warning-subtle)', border: 'var(--warning-border)', text: 'var(--warning-text)' },
           error:    { DEFAULT: 'var(--error)', subtle: 'var(--error-subtle)', border: 'var(--error-border)', text: 'var(--error-text)' },
@@ -239,7 +324,11 @@ body, .themed { transition: background-color .18s ease, border-color .18s ease, 
           skeleton: 'var(--skeleton)',
           overlay:  'var(--overlay)',
         },
-        boxShadow: { sm: 'var(--shadow-sm)', md: 'var(--shadow-md)', lg: 'var(--shadow-lg)', none: 'none' },
+        boxShadow: {
+          sm: 'var(--shadow-sm)', md: 'var(--shadow-md)', lg: 'var(--shadow-lg)', none: 'none',
+          glow: '0 10px 34px -12px var(--glow)',
+          'glow-lg': '0 18px 52px -14px var(--glow)',
+        },
         ringColor: { focus: 'var(--focus-ring)' },
       },
     },
@@ -254,11 +343,13 @@ body, .themed { transition: background-color .18s ease, border-color .18s ease, 
 <script type="text/babel" data-type="module">
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'https://esm.sh/react@18.3.1';
 import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+import { AnimatePresence, motion } from 'https://esm.sh/framer-motion@11.15.0?deps=react@18.3.1,react-dom@18.3.1';
 import {
-  AlertTriangle, ArrowRight, Bookmark, BookmarkCheck, Briefcase, Building2, Check, CheckCircle2,
-  ChevronDown, Clock, Copy, Download, ExternalLink, FileText, GraduationCap, History, Info,
-  LayoutGrid, Loader2, MapPin, Menu, Minus, Moon, Paperclip, Plus, RefreshCw, Search, Send,
-  Settings, Sparkles, Sun, Target, Trash2, TrendingUp, UserRound, Users, X, XCircle,
+  AlertTriangle, ArrowRight, BarChart3, Bell, Bookmark, BookmarkCheck, Briefcase, Building2, Check,
+  CheckCircle2, ChevronDown, Clock, Command, Copy, Database, Download, ExternalLink, FileText, Github,
+  Globe, GraduationCap, History, Info, KeyRound, Layers, Link2, Loader2, MapPin, Menu, Minus, Moon,
+  PanelLeftClose, PanelLeftOpen, Paperclip, Plus, RefreshCw, Rocket, Search, Send, Settings,
+  SlidersHorizontal, Sparkles, Sun, Target, Trash2, TrendingUp, Upload, UserRound, Users, X, XCircle, Zap,
 } from 'https://esm.sh/lucide-react@0.462.0?deps=react@18.3.1';
 
 /* ═══════════════════════ constants ═══════════════════════ */
@@ -271,22 +362,54 @@ const MAX_LIMIT = 30;
 const FOUNDER_MAX_EMPLOYEES = 150;
 const STEP = 5;
 const PLAN_BUDGET = 5;
+// Ek scrape+score run roughly itne seconds leta hai — dock me dikhta hai.
+const SECONDS_PER_SOURCE = 30;
 
 // Backend sirf linkedin + indeed leta hai (app/main.py ka Literal).
+// Baaki do UI me maujood hain par disabled — jhoothi selection se
+// user ko lagta hai wo bhi scrape ho rahe hain.
 const SOURCES = [
-  { id: 'linkedin', label: 'LinkedIn', ready: true },
-  { id: 'indeed', label: 'Indeed', ready: true },
-  { id: 'glassdoor', label: 'Glassdoor', ready: false },
-  { id: 'wellfound', label: 'Wellfound', ready: false },
+  { id: 'linkedin', label: 'LinkedIn', Icon: Briefcase, ready: true },
+  { id: 'indeed', label: 'Indeed', Icon: Search, ready: true },
+  { id: 'wellfound', label: 'Wellfound', Icon: Globe, ready: false },
+  { id: 'github', label: 'GitHub', Icon: Github, ready: false },
 ];
 
 const NAV = [
-  { id: 'overview', label: 'Overview', icon: LayoutGrid },
+  { id: 'overview', label: 'Overview', icon: BarChart3 },
   { id: 'new', label: 'New Search', icon: Sparkles },
-  { id: 'searches', label: 'Searches', icon: History },
-  { id: 'matches', label: 'Matches', icon: Users },
-  { id: 'saved', label: 'Saved', icon: Bookmark },
-  { id: 'contacts', label: 'Contacts', icon: Send },
+  { id: 'matches', label: 'Pipeline', icon: Layers },
+  { id: 'searches', label: 'Talent Pool', icon: History },
+  { id: 'saved', label: 'Saved Matches', icon: Bookmark },
+  { id: 'contacts', label: 'Outreach', icon: Send },
+  { id: 'analytics', label: 'Analytics', icon: TrendingUp },
+  { id: 'settings', label: 'Settings', icon: Settings },
+];
+
+// Model pill. Active model server se aata hai (/api/health) — baaki
+// entries listed hain par abhi switchable nahi.
+const MODELS = [
+  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek-v4-Pro', hint: 'Balanced reasoning · default' },
+  { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5', hint: 'Highest ranking accuracy' },
+  { id: 'openai/gpt-5-mini', label: 'GPT-5 mini', hint: 'Fastest, lowest cost' },
+];
+const modelLabel = (id) => MODELS.find((m) => m.id === id)?.label || (id || '').split('/').pop() || 'model';
+
+const STUDIO_TABS = [
+  { id: 'prompt', label: 'Prompt Studio', Icon: Sparkles },
+  { id: 'document', label: 'Document / Resume Drop', Icon: FileText },
+  { id: 'url', label: 'Job Posting URL', Icon: Link2 },
+];
+
+/* Seniority scrape keyword ko seedha badalta hai — prefix search title ke
+   aage lagta hai. 'any' par kuch nahi jodte. */
+const SENIORITY = [
+  { id: 'any', label: 'Any level', prefix: '' },
+  { id: 'junior', label: 'Junior', prefix: 'Junior' },
+  { id: 'mid', label: 'Mid-level', prefix: '' },
+  { id: 'senior', label: 'Senior', prefix: 'Senior' },
+  { id: 'lead', label: 'Lead / Staff', prefix: 'Lead' },
+  { id: 'principal', label: 'Principal', prefix: 'Principal' },
 ];
 
 const SAMPLE_JD = `Senior Backend Engineer — Bengaluru (Hybrid)
@@ -323,7 +446,11 @@ const api = {
   async req(path, options) {
     const res = await fetch(path, options);
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || data.detail || `Request failed (${res.status})`);
+    if (!res.ok) {
+      const err = new Error(data.error || data.detail || `Request failed (${res.status})`);
+      err.status = res.status;
+      throw err;
+    }
     return data;
   },
   get(path) { return api.req(path); },
@@ -436,15 +563,18 @@ function Toggle({ on, onChange, id, describedBy, disabled }) {
     <button
       type="button" role="switch" aria-checked={on} id={id} aria-describedby={describedBy} disabled={disabled}
       onClick={() => onChange(!on)}
-      className={`group relative h-5 w-9 shrink-0 rounded-full border transition-colors duration-200 disabled:opacity-50 ${ring} ${
-        on ? 'border-brand bg-brand' : 'border-line-control bg-surface-hover hover:border-fg-sec'
+      className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors duration-200 disabled:opacity-50 ${ring} ${
+        on ? 'border-success bg-success' : 'border-line-control bg-surface-hover hover:border-fg-sec'
       }`}
     >
-      <span className={`absolute top-px grid h-[18px] w-[18px] place-items-center rounded-full bg-surface shadow-sm transition-transform duration-200 ${on ? 'translate-x-[18px]' : 'translate-x-px'}`}>
+      <motion.span
+        layout transition={{ type: 'spring', stiffness: 700, damping: 38 }}
+        className={`absolute top-[2px] grid h-[18px] w-[18px] place-items-center rounded-full bg-white shadow-sm ${on ? 'left-[22px]' : 'left-[2px]'}`}
+      >
         {on
-          ? <Check size={11} strokeWidth={3.5} aria-hidden className="text-brand-text" />
+          ? <Check size={11} strokeWidth={3.5} aria-hidden className="text-success" />
           : <X size={10} strokeWidth={3} aria-hidden className="text-fg-muted" />}
-      </span>
+      </motion.span>
     </button>
   );
 }
@@ -537,321 +667,827 @@ function ThemeSwitch({ theme, setTheme }) {
 
 /* ═══════════════════════ sidebar ═══════════════════════ */
 
-function Sidebar({ view, setView, savedCount, contactCount, spend, onNavigate }) {
-  const left = PLAN_BUDGET - spend;
+/* Prism mark — teen kirnein ek gradient badge me. Logo ek hi jagah define
+   hai taaki sidebar, palette aur boot screen kabhi alag na dikhein. */
+function RaynMark({ size = 32, className = '' }) {
+  return (
+    <span
+      aria-hidden
+      style={{ height: size, width: size }}
+      className={`accent-grad relative grid shrink-0 place-items-center rounded-xl shadow-glow ${className}`}
+    >
+      <Sparkles size={Math.round(size * 0.52)} strokeWidth={2.4} className="relative z-10 text-white" />
+      {/* upar se aati halki roshni — badge ko flat hone se bachati hai */}
+      <span className="absolute inset-0 rounded-xl bg-gradient-to-b from-white/30 to-transparent" />
+    </span>
+  );
+}
+
+/* Nav ka active pill Framer Motion se ek item se doosre par slide karta hai.
+   layoutId per-instance unique hai — mobile drawer aur desktop rail dono
+   ek saath mount ho sakte hain. */
+function Sidebar({ view, setView, savedCount, contactCount, spend, collapsed, setCollapsed, navId = 'rail', onNavigate }) {
+  const left = Math.max(0, PLAN_BUDGET - spend);
   const pct = Math.min(100, (spend / PLAN_BUDGET) * 100);
   const low = left < 1;
 
   return (
-    <div className="themed flex h-full w-60 shrink-0 flex-col border-r border-line bg-sidebar">
-      <div className="flex h-14 items-center gap-2.5 px-4">
-        <div aria-hidden className="grid h-7 w-7 place-items-center rounded-md bg-brand text-xs font-bold text-brand-on">HA</div>
-        <div className="min-w-0">
-          <p className="truncate text-h3 font-semibold text-fg">Hiring Agent</p>
-        </div>
+    <div className={`themed relative flex h-full shrink-0 flex-col border-r border-line bg-sidebar backdrop-blur-xl transition-[width] duration-300 ease-out ${collapsed ? 'w-[76px]' : 'w-[248px]'}`}>
+
+      {/* ── brand ── */}
+      {/* h-16 top bar ke barabar hai aur border-b wahin par - isliye header ki
+          horizontal line sidebar se main column tak bina toote chalti hai. */}
+      <div className={`flex h-16 shrink-0 items-center gap-2.5 border-b border-line ${collapsed ? 'justify-center px-0' : 'px-4'}`}>
+        <RaynMark size={collapsed ? 34 : 32} />
+        {!collapsed && (
+          <div className="min-w-0">
+            <p className="accent-text truncate text-h2 font-bold tracking-tight">RAYN.AI</p>
+            <p className="truncate text-[11px] leading-4 text-fg-muted">Autonomous Talent Intelligence</p>
+          </div>
+        )}
       </div>
 
-      <nav aria-label="Main" className="flex-1 space-y-0.5 px-3 py-2">
+      {/* ── nav ── */}
+      <nav aria-label="Main" className={`flex-1 space-y-1 overflow-y-auto py-2 ${collapsed ? 'px-2.5' : 'px-3'}`}>
         {NAV.map(({ id, label, icon: Icon }) => {
           const active = view === id;
+          const badge = id === 'saved' ? savedCount : id === 'contacts' ? contactCount : 0;
           return (
             <button
-              key={id} onClick={() => { setView(id); onNavigate?.(); }} aria-current={active ? 'page' : undefined}
-              className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${ring} ${
-                active ? 'bg-surface-selected font-semibold text-brand-text' : 'font-medium text-fg-sec hover:bg-surface-hover hover:text-fg'
-              }`}
+              key={id}
+              onClick={() => { setView(id); onNavigate?.(); }}
+              aria-current={active ? 'page' : undefined}
+              title={collapsed ? label : undefined}
+              className={`relative flex w-full items-center gap-3 rounded-xl py-2.5 text-sm transition-colors ${ring} ${
+                collapsed ? 'justify-center px-0' : 'px-3'
+              } ${active ? 'font-semibold text-white' : 'font-medium text-fg-sec hover:bg-surface-hover hover:text-fg'}`}
             >
-              {active && <span aria-hidden className="absolute -left-1.5 top-1 bottom-1 w-[3px] rounded-full bg-brand" />}
-              <Icon size={15} aria-hidden className={active ? 'text-brand-text' : 'text-fg-muted'} />
-              <span className="flex-1 text-left">{label}</span>
-              {id === 'saved' && savedCount > 0 && (
-                <span className="rounded border border-line bg-surface px-1.5 text-xs font-semibold tabular-nums text-fg-sec">{savedCount}</span>
+              {active && (
+                <motion.span
+                  aria-hidden
+                  layoutId={`${navId}-nav-pill`}
+                  transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                  className="accent-grad absolute inset-0 rounded-xl shadow-glow"
+                />
               )}
-              {id === 'contacts' && contactCount > 0 && (
-                <span className="rounded border border-line bg-surface px-1.5 text-xs font-semibold tabular-nums text-fg-sec">{contactCount}</span>
+              <Icon size={16} aria-hidden className={`relative z-10 shrink-0 ${active ? 'text-white' : 'text-fg-muted'}`} />
+              {!collapsed && <span className="relative z-10 flex-1 text-left">{label}</span>}
+              {!collapsed && badge > 0 && (
+                <span className={`relative z-10 rounded-md px-1.5 text-xs font-semibold tabular-nums ${
+                  active ? 'bg-white/20 text-white' : 'border border-line bg-surface-hover text-fg-sec'
+                }`}>
+                  {badge}
+                </span>
+              )}
+              {collapsed && badge > 0 && (
+                <span aria-hidden className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-accent-via" />
               )}
             </button>
           );
         })}
       </nav>
 
-      <div className="space-y-2 border-t border-line p-3">
-        {/* credits — low par warning icon + text, sirf rang par nirbhar nahi */}
-        <div className={`rounded-md border p-3 ${low ? 'border-warning-border bg-warning-subtle' : 'border-line bg-surface'}`}>
-          <div className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-fg-sec">
-              {low && <AlertTriangle size={12} aria-hidden className="text-warning-text" />}
-              {low ? 'Low credits' : 'Apify credits'}
-            </span>
-            <span className="text-xs tabular-nums text-fg-muted">${left.toFixed(2)} left</span>
+      {/* ── profile + compute credits ── */}
+      <div className={`shrink-0 border-t border-line-subtle p-3 ${collapsed ? 'px-2.5' : ''}`}>
+        {collapsed ? (
+          <div className="grid place-items-center py-1" title={`Anshu Kumar — Pro Agent Plan, $${left.toFixed(2)} left`}>
+            <span aria-hidden className="accent-grad grid h-9 w-9 place-items-center rounded-full text-xs font-bold text-white">AK</span>
           </div>
-          <div role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}
-               aria-label="Estimated credit usage"
-               className="mt-2 h-1 overflow-hidden rounded-full bg-neutral-subtle">
-            {/* neutral fill — credits main workflow se compete nahi karti.
-                brand color sirf tab jab credits actually kam hon */}
-            <div className={`h-full rounded-full transition-[width] duration-500 ${low ? 'bg-warning' : 'bg-neutral-fill'}`} style={{ width: `${pct}%` }} />
-          </div>
-          <p className="mt-1.5 text-xs text-fg-muted">Estimated from local runs</p>
-        </div>
+        ) : (
+          <div className="themed rounded-xl border border-line bg-surface-sunken p-3">
+            <div className="flex items-center gap-2.5">
+              <span aria-hidden className="accent-grad grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-bold text-white">AK</span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-fg">Anshu Kumar</p>
+                <p className="truncate text-xs font-medium text-brand-text">Pro Agent Plan</p>
+              </div>
+            </div>
 
-        <button className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-fg-sec transition-colors hover:bg-surface-hover hover:text-fg ${ring}`}>
-          <Settings size={15} aria-hidden className="text-fg-muted" /> Settings
-        </button>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-fg-muted">
+                {low ? <AlertTriangle size={11} aria-hidden className="text-warning-text" /> : <Zap size={11} aria-hidden />}
+                {low ? 'Low credits' : 'Compute credits'}
+              </span>
+              <span className={`text-xs font-semibold tabular-nums ${low ? 'text-warning-text' : 'text-fg-sec'}`}>${left.toFixed(2)} left</span>
+            </div>
 
-        <div className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5">
-          <div aria-hidden className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-surface-hover text-xs font-semibold text-fg-sec">A</div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-fg">Anshu</p>
-            <p className="truncate text-xs text-fg-muted">Free plan</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════ job description ═══════════════════════ */
-
-function JdSection({ jd, setJd, attached, setAttached, uploading, uploadFile, error }) {
-  const fileRef = useRef(null);
-  const [dragging, setDragging] = useState(false);
-  const depth = useRef(0);
-
-  return (
-    <section aria-labelledby="jd-head">
-      <SectionHead
-        step="1" title={<span id="jd-head">Start with your job description</span>}
-        description="Paste your JD or upload a document. We'll extract the role, skills, and requirements automatically."
-        aside={<Button size="sm" onClick={() => setJd(SAMPLE_JD)}><Sparkles size={13} aria-hidden className="text-brand-text" /> Sample JD</Button>}
-      />
-
-      <div
-        onDragEnter={(e) => { e.preventDefault(); depth.current++; setDragging(true); }}
-        onDragOver={(e) => e.preventDefault()}
-        onDragLeave={() => { if (--depth.current <= 0) { depth.current = 0; setDragging(false); } }}
-        onDrop={(e) => { e.preventDefault(); depth.current = 0; setDragging(false); if (e.dataTransfer.files?.[0]) uploadFile(e.dataTransfer.files[0]); }}
-        className={`themed relative overflow-hidden rounded-xl border bg-surface shadow-md transition-colors focus-within:border-brand focus-within:ring-4 focus-within:ring-[color:var(--focus-halo)] ${
-          error ? 'border-error-border' : dragging ? 'border-brand' : 'border-line'
-        }`}
-      >
-        <label htmlFor="jd" className="sr-only">Job description</label>
-        <textarea
-          id="jd" value={jd} onChange={(e) => setJd(e.target.value)} spellCheck={false}
-          aria-invalid={!!error} aria-describedby={error ? 'jd-error' : undefined}
-          placeholder="Paste your job description, role, requirements, or skills here..."
-          className="block h-40 w-full resize-none border-0 bg-transparent px-4 py-3 text-body leading-6 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-0"
-        />
-
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-subtle bg-surface-sunken px-3 py-2">
-          {attached ? (
-            <span className="fade-up inline-flex min-w-0 items-center gap-2 rounded-md border border-line bg-surface py-1 pl-2 pr-1 shadow-sm">
-              <FileText size={14} aria-hidden className="shrink-0 text-brand-text" />
-              <span className="truncate text-sm font-medium text-fg">{attached.name}</span>
-              <span className="shrink-0 text-xs tabular-nums text-fg-muted">{fmtBytes(attached.size)}</span>
-              <button onClick={() => { setAttached(null); if (fileRef.current) fileRef.current.value = ''; }}
-                      aria-label={`Remove ${attached.name}`}
-                      className={`shrink-0 rounded p-1 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg ${ring}`}>
-                <X size={12} />
-              </button>
-            </span>
-          ) : (
-            <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
-                    className={`inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm font-medium text-fg-strong transition-colors hover:bg-surface hover:text-fg disabled:opacity-60 ${ring}`}>
-              {uploading
-                ? <><Loader2 size={14} aria-hidden className="animate-spin text-brand-text" /> Reading document…</>
-                : <><Paperclip size={14} aria-hidden className="text-fg-sec" /> Upload PDF or DOCX</>}
-            </button>
-          )}
-          <span className="flex items-center gap-3 text-xs text-fg-muted">
-            {jd.trim().length > 0 && <span className="tabular-nums">{jd.trim().length.toLocaleString()} characters</span>}
-            <span>Max 10 MB</span>
-          </span>
-        </div>
-
-        <input ref={fileRef} type="file" className="sr-only"
-               accept=".pdf,.docx,.doc,.txt,.md,.html,.htm,.rtf,.pptx"
-               onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])} />
-
-        {dragging && (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-lg border-2 border-dashed border-brand bg-brand-subtle">
-            <span className="text-body font-semibold text-brand-text">Drop your JD to read it</span>
+            <div role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}
+                 aria-label="Compute credits used"
+                 className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-neutral-subtle">
+              <motion.div
+                initial={false}
+                animate={{ width: `${pct}%` }}
+                transition={{ type: 'spring', stiffness: 180, damping: 26 }}
+                className={`h-full rounded-full ${low ? 'bg-warning' : 'accent-grad'}`}
+              />
+            </div>
           </div>
         )}
       </div>
 
-      {error && <span id="jd-error"><InlineStatus type="error">{error}</InlineStatus></span>}
+      {/* Collapse toggle rail ke kinare par baithta hai — desktop only. */}
+      {setCollapsed && (
+        <button
+          type="button"
+          onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? 'Keep sidebar open' : 'Collapse sidebar'}
+          title={collapsed ? 'Keep sidebar open' : 'Collapse sidebar (hover se khulti rahegi)'}
+          className={`themed absolute -right-3 top-[60px] hidden h-6 w-6 place-items-center rounded-full border border-line bg-surface-elev text-fg-muted shadow-sm transition-colors hover:border-brand-border hover:text-fg lg:grid ${ring}`}
+        >
+          {collapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════ AI prompt studio ═══════════════════════ */
+
+/* Segmented tabs — active pill Framer Motion se slide karta hai.
+   Roving focus nahi, simple buttons: teen hi options hain. */
+function SegmentedTabs({ tabs, value, onChange, idPrefix }) {
+  return (
+    <div role="tablist" aria-label="Input mode"
+         className="flex w-full gap-1 overflow-x-auto rounded-xl border border-line bg-surface-sunken p-1 sm:w-auto">
+      {tabs.map(({ id, label, Icon }) => {
+        const active = value === id;
+        return (
+          <button
+            key={id} type="button" role="tab" aria-selected={active} onClick={() => onChange(id)}
+            className={`relative flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${ring} ${
+              active ? 'font-semibold text-white' : 'font-medium text-fg-muted hover:text-fg'
+            }`}
+          >
+            {active && (
+              <motion.span aria-hidden layoutId={`${idPrefix}-seg`}
+                           transition={{ type: 'spring', stiffness: 460, damping: 36 }}
+                           className="accent-grad absolute inset-0 rounded-lg shadow-glow" />
+            )}
+            <Icon size={14} aria-hidden className="relative z-10" />
+            <span className="relative z-10 whitespace-nowrap">{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PromptStudio({ jd, setJd, attached, setAttached, uploading, uploadFile, error,
+                        tab, setTab, poolUrl, setPoolUrl, onAttachUrl }) {
+  const fileRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const depth = useRef(0);
+  const chars = jd.trim().length;
+
+  const pick = () => fileRef.current?.click();
+
+  return (
+    <section aria-labelledby="studio-head"
+      onDragEnter={(e) => { e.preventDefault(); depth.current++; setDragging(true); }}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={() => { if (--depth.current <= 0) { depth.current = 0; setDragging(false); } }}
+      onDrop={(e) => { e.preventDefault(); depth.current = 0; setDragging(false); if (e.dataTransfer.files?.[0]) uploadFile(e.dataTransfer.files[0]); }}
+      className={`themed glow-border relative overflow-hidden rounded-2xl border bg-glass shadow-lg backdrop-blur-md transition-shadow focus-within:border-brand focus-within:ring-4 focus-within:ring-[color:var(--focus-halo)] ${
+        error ? 'border-error-border' : dragging ? 'border-brand' : 'border-line'
+      }`}
+    >
+      {/* ── header: title + mode tabs ── */}
+      <div className="flex flex-col gap-3 border-b border-line-subtle px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="grid h-7 w-7 place-items-center rounded-lg border border-brand-border bg-brand-subtle text-brand-text">
+            <Sparkles size={14} />
+          </span>
+          <h2 id="studio-head" className="text-h2 font-semibold text-fg">AI Prompt Studio</h2>
+        </div>
+        <SegmentedTabs tabs={STUDIO_TABS} value={tab} onChange={setTab} idPrefix="studio" />
+      </div>
+
+      {/* ── canvas ── */}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={tab}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.16, ease: 'easeOut' }}
+        >
+          {tab === 'prompt' && (
+            <div className="transition-colors hover:bg-surface-sunken focus-within:bg-surface-sunken">
+              <label htmlFor="jd" className="sr-only">Ideal candidate profile or job description</label>
+              <textarea
+                id="jd" value={jd} onChange={(e) => setJd(e.target.value)} spellCheck={false}
+                aria-invalid={!!error} aria-describedby={error ? 'jd-error' : undefined}
+                placeholder="Describe your ideal candidate — role, must-have skills, seniority, location, and anything that makes a profile a strong fit…"
+                className="sleek-scroll block h-56 w-full resize-none border-0 bg-transparent px-5 py-4 text-body leading-6 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-0"
+              />
+            </div>
+          )}
+
+          {tab === 'document' && (
+            <div className="px-5 py-6">
+              <button
+                type="button" onClick={pick} disabled={uploading}
+                className={`flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line-strong bg-surface-sunken px-6 py-10 text-center transition-colors hover:border-brand hover:bg-brand-subtle disabled:opacity-60 ${ring}`}
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 size={22} aria-hidden className="animate-spin text-brand-text" />
+                    <span className="text-h3 font-semibold text-fg">Reading document…</span>
+                  </>
+                ) : (
+                  <>
+                    <span aria-hidden className="grid h-11 w-11 place-items-center rounded-full border border-brand-border bg-brand-subtle text-brand-text">
+                      <Upload size={18} />
+                    </span>
+                    <span className="text-h3 font-semibold text-fg">Drop a resume or JD, or click to browse</span>
+                    <span className="text-sm text-fg-muted">PDF, DOCX, TXT or Markdown · up to 10 MB · parsed locally, no tokens used</span>
+                  </>
+                )}
+              </button>
+              {chars > 0 && (
+                <p className="mt-3 flex items-center gap-1.5 text-sm text-fg-muted">
+                  <CheckCircle2 size={13} aria-hidden className="text-success-text" />
+                  {chars.toLocaleString()} characters are loaded in the prompt — switch to Prompt Studio to edit them.
+                </p>
+              )}
+            </div>
+          )}
+
+          {tab === 'url' && (
+            <div className="px-5 py-6">
+              <label htmlFor="pool-url" className="block text-h3 font-semibold text-fg">Job posting or careers page URL</label>
+              <p className="mt-1 text-sm text-fg-muted">
+                The link is appended to your prompt as context, so the extractor can use it. Live crawling of the page is not available yet.
+              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input
+                  id="pool-url" type="url" value={poolUrl} onChange={(e) => setPoolUrl(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onAttachUrl(); } }}
+                  placeholder="https://company.com/careers/senior-backend-engineer"
+                  className={`h-10 flex-1 rounded-lg border border-line bg-input px-3 text-body text-fg placeholder:text-fg-muted transition-colors hover:border-line-strong focus:border-brand ${ring}`}
+                />
+                <Button variant="secondary" size="lg" onClick={onAttachUrl} disabled={!poolUrl.trim()}>
+                  <Link2 size={14} aria-hidden /> Add to prompt
+                </Button>
+              </div>
+            </div>
+          )}
+        </motion.div>
+      </AnimatePresence>
+
+      {/* ── studio bar ── */}
+      <div className="flex flex-col gap-3 border-t border-line-subtle bg-surface-sunken px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <AnimatePresence initial={false} mode="wait">
+            {attached ? (
+              <motion.span
+                key="chip"
+                initial={{ opacity: 0, scale: 0.94 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.94 }}
+                transition={{ duration: 0.15, ease: 'easeOut' }}
+                className="inline-flex min-w-0 items-center gap-2 rounded-lg border border-line bg-surface py-1 pl-2 pr-1 shadow-sm"
+              >
+                <FileText size={14} aria-hidden className="shrink-0 text-brand-text" />
+                <span className="truncate text-sm font-medium text-fg">{attached.name}</span>
+                <span className="shrink-0 text-xs tabular-nums text-fg-muted">{fmtBytes(attached.size)}</span>
+                <button onClick={() => { setAttached(null); if (fileRef.current) fileRef.current.value = ''; }}
+                        aria-label={`Remove ${attached.name}`}
+                        className={`shrink-0 rounded p-1 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg ${ring}`}>
+                  <X size={12} />
+                </button>
+              </motion.span>
+            ) : (
+              <motion.button
+                key="upload" type="button" onClick={pick} disabled={uploading}
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className={`inline-flex items-center gap-2 rounded-lg px-2 py-1 text-sm font-medium text-fg-sec transition-colors hover:bg-surface hover:text-fg disabled:opacity-60 ${ring}`}
+              >
+                {uploading
+                  ? <><Loader2 size={14} aria-hidden className="animate-spin text-brand-text" /> Reading document…</>
+                  : <><Paperclip size={14} aria-hidden /> Attach resume or JD</>}
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="rounded-md border border-line bg-surface px-2 py-1 text-xs tabular-nums text-fg-muted">
+            {chars.toLocaleString()} chars
+          </span>
+          <Button size="md" variant="ghost" onClick={() => { setJd(SAMPLE_JD); setTab('prompt'); }}>
+            <FileText size={13} aria-hidden /> Load Sample JD
+          </Button>
+        </div>
+      </div>
+
+      <input ref={fileRef} type="file" className="sr-only"
+             accept=".pdf,.docx,.doc,.txt,.md,.html,.htm,.rtf,.pptx"
+             onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])} />
+
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-2xl border-2 border-dashed border-brand bg-brand-subtle backdrop-blur-sm">
+          <span className="text-body font-semibold text-brand-text">Drop the file to read it</span>
+        </div>
+      )}
+
+      {error && <div className="px-4 pb-3"><span id="jd-error"><InlineStatus type="error">{error}</InlineStatus></span></div>}
     </section>
   );
 }
 
-/* ═══════════════════════ source multi-select ═══════════════════════ */
+/* ═══════════════════════ top bar ═══════════════════════ */
 
-function SourcePicker({ selected, toggle, invalid }) {
+/* Model pill. Active model server se aata hai — baaki entries dikhti to hain
+   par choose nahi hoti, kyunki backend abhi ek hi model chalata hai. */
+function ModelPill({ model }) {
   const [open, setOpen] = useState(false);
   const box = useRef(null);
 
   useEffect(() => {
     if (!open) return;
     const down = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
-    const key = (e) => { if (e.key === 'Escape') { setOpen(false); box.current?.querySelector('button')?.focus(); } };
+    const key = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', down);
     document.addEventListener('keydown', key);
     return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
   }, [open]);
 
-  const chosen = SOURCES.filter((s) => selected.includes(s.id));
-
   return (
     <div ref={box} className="relative">
       <button
         type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open}
-        className={`flex h-8 w-full items-center gap-2 rounded-md border bg-input px-2.5 text-sm shadow-sm transition-colors hover:border-line-strong ${ring} ${
-          invalid ? 'border-error-border' : 'border-line'
-        }`}
+        className={`flex h-9 items-center gap-2 rounded-full border border-line bg-glass px-3 text-sm font-medium text-fg-sec backdrop-blur-md transition-colors hover:border-brand-border hover:text-fg ${ring}`}
       >
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          {chosen.length === 0
-            ? <span className="text-fg-muted">Select at least one</span>
-            : chosen.map((s) => (
-                <span key={s.id} className="shrink-0 rounded border border-line bg-surface-hover px-1.5 text-xs font-medium text-fg-sec">{s.label}</span>
-              ))}
-        </span>
-        <ChevronDown size={14} aria-hidden className={`shrink-0 text-fg-muted transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+        <Zap size={13} aria-hidden className="text-brand-text" />
+        <span className="hidden max-w-[150px] truncate sm:inline">{modelLabel(model)}</span>
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_8px_var(--success)]" />
+        <ChevronDown size={13} aria-hidden className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && (
-        <ul role="listbox" aria-multiselectable="true"
-            className="fade-up themed absolute inset-x-0 top-[calc(100%+4px)] z-30 overflow-hidden rounded-md border border-line bg-surface-elev p-1 shadow-lg">
-          {SOURCES.map((s) => {
-            const on = selected.includes(s.id);
-            return (
-              <li key={s.id} role="option" aria-selected={on} aria-disabled={!s.ready}>
-                <button type="button" disabled={!s.ready} onClick={() => toggle(s.id)}
-                        className={`flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left text-sm transition-colors ${ring} ${
-                          s.ready ? 'text-fg hover:bg-surface-hover' : 'cursor-not-allowed text-fg-disabled'
-                        }`}>
-                  <span aria-hidden className={`grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors ${
-                    on ? 'border-brand bg-brand' : 'border-line-control bg-surface'
-                  }`}>
-                    {on && <Check size={11} strokeWidth={3} className="text-brand-on" />}
-                  </span>
-                  <span className="flex-1 font-medium">{s.label}</span>
-                  {!s.ready && <span className="rounded border border-line px-1.5 text-xs font-medium text-fg-muted">Soon</span>}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/* ═══════════════════════ search configuration ═══════════════════════ */
-
-/* Teeno settings ka structure bilkul ek jaisa hai —
-   label → hint → control row → status. Har slot ki min-height fix hai
-   taaki teeno columns ki lines aapas me align rahein. */
-function Setting({ label, hint, htmlFor, children, status }) {
-  return (
-    <div className="flex flex-col bg-surface px-4 py-4">
-      <label htmlFor={htmlFor} className="block text-h3 font-semibold text-fg">{label}</label>
-      <p className="mt-1 min-h-[36px] text-sm text-fg-muted">{hint}</p>
-      <div className="mt-1 flex min-h-[32px] items-center gap-3">{children}</div>
-      <div className="mt-2 min-h-[18px] text-sm">{status}</div>
-    </div>
-  );
-}
-
-function ConfigSection({ limit, setLimit, sources, toggleSource, useAi, setUseAi,
-                        recommend, setRecommend, cost, busy, stage, onRun }) {
-  return (
-    <section aria-labelledby="cfg-head">
-      <SectionHead step="2" title={<span id="cfg-head">Search configuration</span>}
-                   description="Choose how wide to search and whether the AI should rank what it finds." />
-
-      <Card className="overflow-hidden">
-        {/* gap-px + cell background = har breakpoint par saaf 1px dividers */}
-        <div className="grid grid-cols-1 gap-px bg-line-subtle sm:grid-cols-2 lg:grid-cols-4">
-
-          <Setting
-            label="Jobs to find" htmlFor="limit"
-            hint={`Postings pulled from each source (${MIN_LIMIT}–${MAX_LIMIT}).`}
-            status={<span className="text-fg-muted">Est. cost <span className="font-medium tabular-nums text-fg-sec">~${cost}</span></span>}
+      <AnimatePresence>
+        {open && (
+          <motion.ul
+            role="listbox" aria-label="Scoring model"
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.14 }}
+            className="themed absolute right-0 top-[calc(100%+6px)] z-40 w-72 overflow-hidden rounded-xl border border-line bg-glass-strong p-1 shadow-lg backdrop-blur-xl"
           >
-              <div className="flex h-8 items-center rounded-md border border-line bg-input shadow-sm">
+            {MODELS.map((m) => {
+              const active = m.id === model;
+              return (
+                <li key={m.id} role="option" aria-selected={active} aria-disabled={!active}>
+                  <div className={`flex items-start gap-2.5 rounded-lg px-2.5 py-2 ${active ? 'bg-brand-subtle' : ''}`}>
+                    <span aria-hidden className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-success' : 'bg-neutral-fill'}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className={`block truncate text-sm font-semibold ${active ? 'text-brand-text' : 'text-fg-sec'}`}>{m.label}</span>
+                      <span className="block truncate text-xs text-fg-muted">{m.hint}</span>
+                    </span>
+                    {active
+                      ? <Check size={13} strokeWidth={3} aria-hidden className="mt-0.5 shrink-0 text-brand-text" />
+                      : <span className="mt-px shrink-0 rounded border border-line px-1.5 text-xs font-medium text-fg-muted">Soon</span>}
+                  </div>
+                </li>
+              );
+            })}
+            <li className="border-t border-line-subtle px-2.5 py-2 text-xs text-fg-muted">
+              Set by <code className="text-fg-sec">OPENROUTER_MODEL</code> on the server.
+            </li>
+          </motion.ul>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* Bell recent activity dikhati hai — wahi events jo toast bankar guzre.
+   Unread count last-opened ke baad aaye events ka hai. */
+function NotificationBell({ log, unread, onOpen }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const down = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    const key = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', down);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
+  }, [open]);
+
+  return (
+    <div ref={box} className="relative">
+      <button
+        type="button" aria-haspopup="dialog" aria-expanded={open}
+        aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+        onClick={() => { setOpen((o) => { if (!o) onOpen(); return !o; }); }}
+        className={`relative grid h-9 w-9 place-items-center rounded-full border border-line bg-glass text-fg-muted backdrop-blur-md transition-colors hover:border-brand-border hover:text-fg ${ring}`}
+      >
+        <Bell size={15} />
+        {unread > 0 && (
+          <span aria-hidden className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-accent-via ring-2 ring-app" />
+        )}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.14 }}
+            className="themed absolute right-0 top-[calc(100%+6px)] z-40 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line bg-glass-strong shadow-lg backdrop-blur-xl"
+          >
+            <p className="border-b border-line-subtle px-3 py-2 text-sm font-semibold text-fg">Activity</p>
+            {log.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-fg-muted">Nothing yet — run a search to see activity here.</p>
+            ) : (
+              <ul className="max-h-80 divide-y divide-line-subtle overflow-y-auto">
+                {log.map((t) => {
+                  const { Icon, cls } = STATUS[t.type] || STATUS.info;
+                  return (
+                    <li key={t.id} className="flex items-start gap-2.5 px-3 py-2.5">
+                      <Icon size={14} aria-hidden className={`mt-px shrink-0 ${cls}`} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium text-fg">{t.title}</span>
+                        {t.body && <span className="mt-0.5 block text-xs text-fg-muted">{t.body}</span>}
+                      </span>
+                      <span className="shrink-0 text-xs tabular-nums text-fg-muted">{timeAgo(t.at)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function TopBar({ theme, setTheme, model, creditsLeft, dbOk, log, unread, markRead,
+                 viewLabel, ViewIcon, onOpenNav, onOpenPalette }) {
+  const low = creditsLeft < 1;
+
+  return (
+    <header className="themed sticky top-0 z-30 flex h-16 shrink-0 items-center border-b border-line bg-glass backdrop-blur-xl">
+     <div className="mx-auto flex w-full max-w-[1280px] items-center gap-3 px-4 sm:px-6">
+      <button onClick={onOpenNav} aria-label="Open navigation"
+              className={`-ml-1 rounded-lg p-2 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg lg:hidden ${ring}`}>
+        <Menu size={17} />
+      </button>
+
+      {ViewIcon && (
+        <div className="hidden shrink-0 items-center gap-2 lg:flex">
+          <ViewIcon size={15} aria-hidden className="text-fg-muted" />
+          <span className="text-sm font-semibold text-fg">{viewLabel}</span>
+        </div>
+      )}
+
+      {/* Global search — click ya ⌘K dono command palette kholte hain. */}
+      <button
+        type="button" onClick={onOpenPalette}
+        className={`group flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border border-line bg-input px-3 text-left text-sm text-fg-muted transition-colors hover:border-brand-border lg:max-w-2xl ${ring}`}
+      >
+        <Search size={14} aria-hidden className="shrink-0" />
+        <span className="min-w-0 flex-1 truncate">Search candidates, runs, saved matches…</span>
+        <kbd aria-hidden className="hidden shrink-0 items-center gap-0.5 rounded border border-line bg-surface px-1.5 py-0.5 text-xs font-medium text-fg-muted sm:inline-flex">
+          <Command size={10} /> K
+        </kbd>
+      </button>
+
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className="hidden md:block"><ModelPill model={model} /></div>
+
+        {!dbOk && (
+          <span title="History and saved matches are not being stored"
+                className="hidden items-center gap-1.5 rounded-full border border-warning-border bg-warning-subtle px-2.5 py-1 text-xs font-medium text-warning-text sm:inline-flex">
+            <AlertTriangle size={11} aria-hidden /> DB offline
+          </span>
+        )}
+
+        {/* credits chip — number ke neeche patli progress bar */}
+        <div className={`hidden h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold tabular-nums backdrop-blur-md sm:flex ${
+          low ? 'border-warning-border bg-warning-subtle text-warning-text' : 'border-line bg-glass text-fg-sec'
+        }`}>
+          {low ? <AlertTriangle size={11} aria-hidden /> : <Zap size={11} aria-hidden className="text-brand-text" />}
+          ${creditsLeft.toFixed(2)} left
+        </div>
+
+        <NotificationBell log={log} unread={unread} onOpen={markRead} />
+        <ThemeSwitch theme={theme} setTheme={setTheme} />
+      </div>
+     </div>
+    </header>
+  );
+}
+
+/* ═══════════════════════ command palette (⌘K) ═══════════════════════ */
+
+/* Views par jump, aur past runs / saved matches me naam se search.
+   Sab kuch already loaded state par chalta hai — koi extra request nahi. */
+function CommandPalette({ open, onClose, go, history, saved, openHistory }) {
+  const [q, setQ] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => { if (open) { setQ(''); setTimeout(() => inputRef.current?.focus(), 20); } }, [open]);
+
+  const needle = q.trim().toLowerCase();
+  const views = NAV.filter((n) => !needle || n.label.toLowerCase().includes(needle));
+  const runs = (history || [])
+    .filter((h) => !needle || `${h.title || ''} ${h.location || ''}`.toLowerCase().includes(needle))
+    .slice(0, 5);
+  const matches = (saved || [])
+    .filter((j) => !needle || `${j.title || ''} ${j.company || ''}`.toLowerCase().includes(needle))
+    .slice(0, 5);
+
+  if (!open) return null;
+
+  const Row = ({ Icon, title, sub, onPick }) => (
+    <button type="button" onClick={() => { onPick(); onClose(); }}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface-hover ${ring}`}>
+      <Icon size={15} aria-hidden className="shrink-0 text-fg-muted" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-fg">{title}</span>
+        {sub && <span className="block truncate text-xs text-fg-muted">{sub}</span>}
+      </span>
+      <ArrowRight size={13} aria-hidden className="shrink-0 text-fg-disabled" />
+    </button>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh]" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div className="absolute inset-0 bg-overlay backdrop-blur-sm" onClick={onClose} aria-hidden />
+      <motion.div
+        initial={{ opacity: 0, y: -8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.16, ease: 'easeOut' }}
+        className="themed relative w-full max-w-xl overflow-hidden rounded-2xl border border-line bg-glass-strong shadow-lg backdrop-blur-xl"
+      >
+        <div className="flex items-center gap-2.5 border-b border-line-subtle px-4">
+          <Search size={16} aria-hidden className="shrink-0 text-fg-muted" />
+          <input
+            ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+            placeholder="Jump to a view, a past run, or a saved match…"
+            aria-label="Search"
+            className="h-12 flex-1 border-0 bg-transparent text-body text-fg placeholder:text-fg-muted focus:outline-none focus:ring-0"
+          />
+          <kbd className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 text-xs text-fg-muted">esc</kbd>
+        </div>
+
+        <div className="max-h-[52vh] overflow-y-auto p-2">
+          {views.length > 0 && (
+            <>
+              <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-fg-muted">Go to</p>
+              {views.map((n) => <Row key={n.id} Icon={n.icon} title={n.label} onPick={() => go(n.id)} />)}
+            </>
+          )}
+          {runs.length > 0 && (
+            <>
+              <p className="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">Past runs</p>
+              {runs.map((h) => (
+                <Row key={h.id} Icon={History} title={h.title || 'Untitled search'}
+                     sub={`${h.count ?? h.jobCount ?? 0} profiles · ${timeAgo(h.createdAt || h.created_at)}`}
+                     onPick={() => openHistory(h)} />
+              ))}
+            </>
+          )}
+          {matches.length > 0 && (
+            <>
+              <p className="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">Saved matches</p>
+              {matches.map((j) => (
+                <Row key={jobKey(j)} Icon={Bookmark} title={j.title || 'Untitled role'} sub={j.company}
+                     onPick={() => go('saved')} />
+              ))}
+            </>
+          )}
+          {views.length === 0 && runs.length === 0 && matches.length === 0 && (
+            <p className="px-3 py-8 text-center text-sm text-fg-muted">No matches for “{q}”.</p>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+/* ═══════════════════════ pipeline configuration (bento) ═══════════════════════ */
+
+function BentoCard({ Icon, title, hint, children }) {
+  return (
+    <div className="themed glow-border flex flex-col rounded-2xl border border-line bg-glass p-6 shadow-lg backdrop-blur-md">
+      <div className="flex items-start gap-2.5">
+        <span aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-brand-border bg-brand-subtle text-brand-text">
+          <Icon size={15} />
+        </span>
+        <div className="min-w-0">
+          <h3 className="text-h2 font-semibold text-fg">{title}</h3>
+          <p className="mt-0.5 text-sm text-fg-muted">{hint}</p>
+        </div>
+      </div>
+      <div className="mt-6 flex-1 space-y-6">{children}</div>
+    </div>
+  );
+}
+
+function FieldLabel({ children, htmlFor, aside }) {
+  return (
+    <div className="mb-2 flex items-center justify-between gap-3">
+      <label htmlFor={htmlFor} className="text-h3 font-semibold text-fg">{children}</label>
+      {aside}
+    </div>
+  );
+}
+
+/* Toggle row — label, subtitle, switch aur ek status badge.
+   Badge me icon + shabd dono hain, sirf rang par nirbhar nahi. */
+function SwitchRow({ id, title, subtitle, on, onChange, disabled, note }) {
+  return (
+    <div className={`rounded-xl border border-line bg-surface-sunken p-4 transition-colors ${disabled ? 'opacity-60' : 'hover:border-line-strong'}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <label htmlFor={id} className="block text-h3 font-semibold text-fg">{title}</label>
+          <p id={`${id}-state`} className="mt-0.5 text-sm text-fg-muted">{subtitle}</p>
+        </div>
+        <Toggle id={id} on={on} onChange={onChange} disabled={disabled} describedBy={`${id}-state`} />
+      </div>
+      <div className="mt-2.5 flex items-center gap-2">
+        {on ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-success-border bg-success-subtle px-2 py-0.5 text-xs font-semibold text-success-text">
+            <Check size={11} strokeWidth={3} aria-hidden /> Enabled
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2 py-0.5 text-xs font-semibold text-fg-muted">
+            <X size={11} strokeWidth={3} aria-hidden /> Disabled
+          </span>
+        )}
+        {note && <span className="min-w-0 truncate text-xs text-fg-muted">{note}</span>}
+      </div>
+    </div>
+  );
+}
+
+function PipelineConfig({ limit, setLimit, cost, sources, toggleSource, targetTitle, setTargetTitle,
+                          detected, seniority, setSeniority, useAi, setUseAi, recommend, setRecommend }) {
+  const sIndex = Math.max(0, SENIORITY.findIndex((s) => s.id === seniority));
+  const fill = (sIndex / (SENIORITY.length - 1)) * 100;
+
+  return (
+    <section aria-labelledby="cfg-head" className="space-y-3">
+      <div>
+        <h2 id="cfg-head" className="text-h1 font-semibold text-fg">Search &amp; Intelligence Configuration</h2>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+
+        {/* ── column 1 — sourcing ── */}
+        <BentoCard Icon={Target} title="Target Pool &amp; Platforms" hint="Where RAYN looks, and how many profiles it pulls per platform.">
+          <div>
+            <FieldLabel htmlFor="limit"
+              aside={<span className="rounded-full border border-line bg-surface px-2 py-0.5 text-xs font-semibold tabular-nums text-brand-text">~${cost} total</span>}>
+              Candidates per platform
+            </FieldLabel>
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 items-center rounded-xl border border-line bg-input shadow-sm">
                 <button type="button" onClick={() => setLimit(Math.max(MIN_LIMIT, limit - STEP))} disabled={limit <= MIN_LIMIT}
-                        aria-label="Decrease jobs to find"
-                        className={`grid h-full w-8 place-items-center rounded-l-md text-fg-sec transition-colors hover:bg-surface-hover disabled:text-fg-disabled disabled:hover:bg-transparent ${ring}`}>
-                  <Minus size={14} />
+                        aria-label="Fewer candidates"
+                        className={`grid h-full w-11 place-items-center rounded-l-xl text-fg-sec transition-colors hover:bg-surface-hover disabled:text-fg-disabled disabled:hover:bg-transparent ${ring}`}>
+                  <Minus size={15} />
                 </button>
                 <input id="limit" type="text" inputMode="numeric" value={limit} readOnly
-                       aria-label="Jobs to find per source"
-                       className="h-full w-12 border-x border-line bg-transparent text-center text-h3 font-semibold tabular-nums text-fg focus:outline-none" />
+                       aria-label="Candidates to scan per platform"
+                       className="h-full w-14 border-x border-line bg-transparent text-center text-h1 font-semibold tabular-nums text-fg focus:outline-none" />
                 <button type="button" onClick={() => setLimit(Math.min(MAX_LIMIT, limit + STEP))} disabled={limit >= MAX_LIMIT}
-                        aria-label="Increase jobs to find"
-                        className={`grid h-full w-8 place-items-center rounded-r-md text-fg-sec transition-colors hover:bg-surface-hover disabled:text-fg-disabled disabled:hover:bg-transparent ${ring}`}>
-                  <Plus size={14} />
+                        aria-label="More candidates"
+                        className={`grid h-full w-11 place-items-center rounded-r-xl text-fg-sec transition-colors hover:bg-surface-hover disabled:text-fg-disabled disabled:hover:bg-transparent ${ring}`}>
+                  <Plus size={15} />
                 </button>
               </div>
-          </Setting>
+              <p className="text-sm text-fg-muted">{MIN_LIMIT}–{MAX_LIMIT} per platform</p>
+            </div>
+          </div>
 
-          <Setting
-            label="Job sources"
-            hint="Which job boards to scrape from."
-            status={sources.length === 0
-              ? <span className="flex items-center gap-1.5 text-error-text"><AlertTriangle size={12} aria-hidden /> Pick at least one source.</span>
-              : <span className="text-fg-muted">{sources.length} selected · ~{limit * sources.length} postings</span>}
-          >
-            <div className="w-full"><SourcePicker selected={sources} toggle={toggleSource} invalid={sources.length === 0} /></div>
-          </Setting>
+          <div>
+            <FieldLabel
+              aside={sources.length === 0
+                ? <span className="flex items-center gap-1 text-xs font-medium text-error-text"><AlertTriangle size={11} aria-hidden /> Pick one</span>
+                : <span className="text-xs text-fg-muted">{sources.length} selected · ~{limit * sources.length} profiles</span>}>
+              Sourcing platforms
+            </FieldLabel>
+            <div className="flex flex-wrap gap-2">
+              {SOURCES.map(({ id, label, Icon, ready }) => {
+                const on = sources.includes(id);
+                return (
+                  <motion.button
+                    key={id} type="button" disabled={!ready}
+                    whileTap={ready ? { scale: 0.96 } : undefined}
+                    onClick={() => toggleSource(id)}
+                    aria-pressed={on} title={ready ? undefined : `${label} sourcing is not available yet`}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${ring} ${
+                      !ready ? 'cursor-not-allowed border-line-subtle bg-surface-sunken text-fg-disabled'
+                        : on ? 'border-brand-border bg-brand-subtle text-brand-text'
+                             : 'border-line bg-surface text-fg-sec hover:border-line-strong hover:text-fg'
+                    }`}
+                  >
+                    <Icon size={13} aria-hidden />
+                    {label}
+                    {ready
+                      ? on && <Check size={13} strokeWidth={3} aria-hidden />
+                      : <span className="rounded border border-line px-1 text-xs">Soon</span>}
+                  </motion.button>
+                );
+              })}
+            </div>
+          </div>
 
-          <Setting
-            label="AI scoring &amp; ranking" htmlFor="ai"
-            hint="Score and rank every posting found."
-            /* status brand color me hai, green me nahi — ye product ka primary
-               control hai, success message nahi */
-            status={<span id="ai-state" className="text-fg-muted">
-              {useAi ? '— adds ~30s and tokens' : '— scraping only, no scores'}
-            </span>}
-          >
-            <Toggle id="ai" on={useAi} onChange={setUseAi} describedBy="ai-state" />
-            <span className="flex items-center gap-1.5 text-sm">
-              {useAi
-                ? <><Check size={13} strokeWidth={3} aria-hidden className="text-brand-text" /><span className="font-semibold text-brand-text">Enabled</span></>
-                : <><X size={13} strokeWidth={3} aria-hidden className="text-fg-muted" /><span className="font-semibold text-fg-sec">Disabled</span></>}
-            </span>
-          </Setting>
+          <div>
+            <FieldLabel htmlFor="target-title"
+              aside={detected ? <span className="truncate text-xs text-fg-muted">AI read: {detected}</span> : null}>
+              Target role / title
+            </FieldLabel>
+            <input
+              id="target-title" value={targetTitle} onChange={(e) => setTargetTitle(e.target.value)}
+              placeholder={detected || 'Auto-detected from your prompt'}
+              className={`h-11 w-full rounded-xl border border-line bg-input px-3 text-body text-fg placeholder:text-fg-muted transition-colors hover:border-line-strong focus:border-brand ${ring}`}
+            />
+          </div>
+        </BentoCard>
 
-          {/* Default OFF — user chaahe to on kare. Scoring ke bina koi gap
-              nikal hi nahi sakta, isliye AI off hone par ye bhi disabled. */}
-          <Setting
-            label="Career recommendations" htmlFor="rec"
-            hint="Turn near-misses into a study plan."
-            status={<span id="rec-state" className="text-fg-muted">
-              {!useAi ? '— needs AI scoring on' : recommend ? '— plan offered with results' : '— off'}
-            </span>}
-          >
-            <Toggle id="rec" on={recommend && useAi} onChange={setRecommend} describedBy="rec-state" disabled={!useAi} />
-            <span className="flex items-center gap-1.5 text-sm">
-              {recommend && useAi
-                ? <><Check size={13} strokeWidth={3} aria-hidden className="text-brand-text" /><span className="font-semibold text-brand-text">Enabled</span></>
-                : <><X size={13} strokeWidth={3} aria-hidden className="text-fg-muted" /><span className="font-semibold text-fg-sec">Disabled</span></>}
-            </span>
-          </Setting>
-        </div>
+        {/* ── column 2 — intelligence ── */}
+        <BentoCard Icon={SlidersHorizontal} title="AI Evaluation &amp; Ranking" hint="How every sourced profile is scored, ranked and explained.">
+          <SwitchRow
+            id="ai" title="Deep Semantic Scoring &amp; Fit Analysis"
+            subtitle={useAi
+              ? 'Scores and ranks every profile against your prompt. Adds ~30s.'
+              : 'Off — profiles are sourced but not scored or ranked.'}
+            on={useAi} onChange={setUseAi}
+          />
 
-        <div className="flex flex-col gap-3 border-t border-line-subtle bg-surface-sunken px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-fg-muted">
-            {busy ? 'Usually takes 1.5–3 minutes.' : 'Results appear below as a ranked pipeline.'}
-          </p>
-          <Button variant="primary" size="lg" onClick={onRun} disabled={busy} className="w-full sm:w-auto">
-            {busy ? <><Loader2 size={15} aria-hidden className="animate-spin" /> {stage}</> : <><Sparkles size={15} aria-hidden /> Find candidates</>}
-          </Button>
-        </div>
-      </Card>
+          <SwitchRow
+            id="rec" title="Career Growth &amp; Skill-Gap Roadmap"
+            subtitle="Turns near-misses into a 15/30-day upskilling plan."
+            on={recommend && useAi} onChange={setRecommend} disabled={!useAi}
+            note={!useAi ? 'Needs semantic scoring on' : null}
+          />
+
+          <div>
+            <FieldLabel htmlFor="seniority"
+              aside={<span className="rounded-full border border-brand-border bg-brand-subtle px-2 py-0.5 text-xs font-semibold text-brand-text">
+                {SENIORITY[sIndex].label}
+              </span>}>
+              Seniority focus
+            </FieldLabel>
+            <input
+              id="seniority" type="range" className="rayn-range"
+              min={0} max={SENIORITY.length - 1} step={1} value={sIndex}
+              style={{ '--fill': `${fill}%` }}
+              aria-valuetext={SENIORITY[sIndex].label}
+              onChange={(e) => setSeniority(SENIORITY[Number(e.target.value)].id)}
+            />
+            <div aria-hidden className="mt-1 flex justify-between text-xs text-fg-muted">
+              <span>Any</span><span>Senior</span><span>Principal</span>
+            </div>
+          </div>
+        </BentoCard>
+      </div>
     </section>
+  );
+}
+
+/* ═══════════════════════ floating action dock ═══════════════════════ */
+
+/* Sticky rehta hai content column ke andar, isliye ye sidebar ke neeche nahi
+   jaata aur results scroll hone par bhi haath ke paas rehta hai. */
+function ActionDock({ profiles, cost, seconds, busy, stage, blocked, onLaunch }) {
+  return (
+    <div className="pointer-events-none sticky bottom-5 z-30 flex justify-center">
+      <motion.div
+        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 28 }}
+        className="themed pointer-events-auto flex w-full max-w-2xl flex-col gap-3 rounded-2xl border border-line bg-glass-strong p-3 shadow-lg backdrop-blur-xl sm:w-auto sm:flex-row sm:items-center sm:gap-5 sm:rounded-full sm:pl-5 sm:pr-3"
+      >
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          <Zap size={14} aria-hidden className="shrink-0 text-brand-text" />
+          <span className="min-w-0 truncate text-fg-sec">
+            <span className="font-semibold tabular-nums text-fg">{profiles}</span> profiles
+            <span className="mx-1.5 text-fg-disabled">•</span>
+            est. <span className="font-semibold tabular-nums text-fg">~${cost}</span>
+            <span className="mx-1.5 text-fg-disabled">•</span>
+            <span className="tabular-nums">~{seconds}s</span>
+          </span>
+        </div>
+
+        <motion.button
+          type="button" onClick={onLaunch} disabled={busy || blocked}
+          whileHover={busy || blocked ? undefined : { scale: 1.03 }}
+          whileTap={busy || blocked ? undefined : { scale: 0.97 }}
+          className={`accent-grad inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full px-6 text-body font-semibold text-white transition-shadow disabled:pointer-events-none disabled:opacity-60 ${ring} ${
+            busy || blocked ? 'shadow-glow' : 'glow-pulse hover:shadow-glow-lg'
+          }`}
+        >
+          {busy
+            ? <><Loader2 size={16} aria-hidden className="animate-spin" /> {stage}</>
+            : <><Rocket size={16} aria-hidden /> Launch RAYN Pipeline</>}
+        </motion.button>
+      </motion.div>
+    </div>
   );
 }
 
@@ -1608,14 +2244,186 @@ function Searches({ history, loading, onOpen, onClear, onDelete }) {
 
 /* ═══════════════════════ app ═══════════════════════ */
 
+/* ═══════════════════════ analytics ═══════════════════════ */
+
+/* Sab kuch already loaded state se banta hai — /api/stats, history aur
+   maujooda pipeline. Koi naya endpoint nahi. */
+function Analytics({ stats, history, jobs, saved, spend }) {
+  const bands = useMemo(() => {
+    const scored = jobs.filter((j) => j.matchScore != null);
+    const bucket = { strong: 0, good: 0, partial: 0, weak: 0 };
+    for (const j of scored) {
+      if (j.matchScore >= 75) bucket.strong++;
+      else if (j.matchScore >= 55) bucket.good++;
+      else if (j.matchScore >= 35) bucket.partial++;
+      else bucket.weak++;
+    }
+    return { total: scored.length, ...bucket };
+  }, [jobs]);
+
+  const rows = [
+    { id: 'strong', label: 'Strong match (75+)', n: bands.strong, cls: 'bg-success' },
+    { id: 'good', label: 'Good match (55–74)', n: bands.good, cls: 'bg-warning' },
+    { id: 'partial', label: 'Partial match (35–54)', n: bands.partial, cls: 'bg-info' },
+    { id: 'weak', label: 'Weak match (<35)', n: bands.weak, cls: 'bg-neutral-fill' },
+  ];
+
+  const runs = history.slice(0, 8);
+  const maxCount = Math.max(1, ...runs.map((h) => h.count ?? 0));
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <StatTile label="Sourcing runs" value={stats.searches ?? 0} hint="All time" />
+        <StatTile label="Profiles sourced" value={stats.roles ?? 0} hint="Across every run" />
+        <StatTile label="Avg match score" value={stats.avgScore == null ? '—' : `${Math.round(stats.avgScore)}%`} hint="Scored profiles only" />
+        <StatTile label="Saved matches" value={saved.length} hint="Your shortlist" />
+        <StatTile label="Compute spend" value={`$${spend.toFixed(2)}`} hint={`of $${PLAN_BUDGET.toFixed(2)} budget`} />
+      </div>
+
+      <Card className="p-5">
+        <h3 className="text-h2 font-semibold text-fg">Match quality — current pipeline</h3>
+        <p className="mt-0.5 text-sm text-fg-muted">
+          {bands.total === 0 ? 'Run a search with scoring on to see the distribution.' : `${bands.total} scored profiles in the open pipeline.`}
+        </p>
+        <ul className="mt-4 space-y-3">
+          {rows.map((r) => {
+            const pct = bands.total ? (r.n / bands.total) * 100 : 0;
+            return (
+              <li key={r.id}>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-fg-sec">{r.label}</span>
+                  <span className="tabular-nums text-fg-muted">{r.n}</span>
+                </div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-neutral-subtle">
+                  <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }}
+                              transition={{ type: 'spring', stiffness: 160, damping: 24 }}
+                              className={`h-full rounded-full ${r.cls}`} />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+
+      <Card className="p-5">
+        <h3 className="text-h2 font-semibold text-fg">Recent runs</h3>
+        {runs.length === 0 ? (
+          <p className="mt-2 text-sm text-fg-muted">No runs yet.</p>
+        ) : (
+          <ul className="mt-4 space-y-3">
+            {runs.map((h) => (
+              <li key={h.id} className="flex items-center gap-3">
+                <span className="w-40 shrink-0 truncate text-sm text-fg-sec" title={h.title}>{h.title || 'Untitled search'}</span>
+                <span className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-subtle">
+                  <motion.span initial={{ width: 0 }} animate={{ width: `${((h.count ?? 0) / maxCount) * 100}%` }}
+                               transition={{ type: 'spring', stiffness: 160, damping: 24 }}
+                               className="accent-grad block h-full rounded-full" />
+                </span>
+                <span className="w-24 shrink-0 text-right text-xs tabular-nums text-fg-muted">
+                  {h.count ?? 0} · ${Number(h.cost || 0).toFixed(2)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ═══════════════════════ settings ═══════════════════════ */
+
+function SettingRow({ Icon, label, hint, children }) {
+  return (
+    <div className="flex flex-col gap-3 border-b border-line-subtle px-5 py-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-start gap-3">
+        <span aria-hidden className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-surface-sunken text-fg-muted">
+          <Icon size={15} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-h3 font-semibold text-fg">{label}</p>
+          <p className="mt-0.5 text-sm text-fg-muted">{hint}</p>
+        </div>
+      </div>
+      <div className="shrink-0 sm:pl-4">{children}</div>
+    </div>
+  );
+}
+
+function OkBadge({ ok, yes, no }) {
+  return ok ? (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-success-border bg-success-subtle px-2.5 py-1 text-xs font-semibold text-success-text">
+      <CheckCircle2 size={12} aria-hidden /> {yes}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-warning-border bg-warning-subtle px-2.5 py-1 text-xs font-semibold text-warning-text">
+      <AlertTriangle size={12} aria-hidden /> {no}
+    </span>
+  );
+}
+
+function SettingsView({ health, theme, setTheme, creditsLeft, onClearHistory }) {
+  const db = health?.db || {};
+  return (
+    <div className="space-y-6">
+      <Card className="overflow-hidden">
+        <SettingRow Icon={Zap} label="Scoring model" hint="Set on the server with OPENROUTER_MODEL.">
+          <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface-sunken px-3 py-1.5 text-sm font-medium text-fg-sec">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-success" />
+            {health?.model || '—'}
+          </span>
+        </SettingRow>
+
+        <SettingRow Icon={KeyRound} label="Apify sourcing key" hint="APIFY_API_KEY — required to source profiles.">
+          <OkBadge ok={!!health?.apifyKey} yes="Connected" no="Missing" />
+        </SettingRow>
+
+        <SettingRow Icon={KeyRound} label="OpenRouter key" hint="OPENROUTER_API_KEY — required for scoring and drafts.">
+          <OkBadge ok={!!health?.openRouterKey} yes="Connected" no="Missing" />
+        </SettingRow>
+
+        <SettingRow Icon={Database} label="Database"
+                    hint={db.connected ? 'Runs, saved matches and drafts are persisted.' : (db.error || 'DATABASE_URL is not set — nothing is stored.')}>
+          <OkBadge ok={!!db.connected} yes="Connected" no="Offline" />
+        </SettingRow>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <SettingRow Icon={Sun} label="Appearance" hint="RAYN defaults to dark. Your choice is remembered on this device.">
+          <ThemeSwitch theme={theme} setTheme={setTheme} />
+        </SettingRow>
+
+        <SettingRow Icon={Zap} label="Compute credits" hint={`Estimated from your runs against a $${PLAN_BUDGET.toFixed(2)} budget.`}>
+          <span className="text-h2 font-semibold tabular-nums text-fg">${creditsLeft.toFixed(2)}</span>
+        </SettingRow>
+
+        <SettingRow Icon={Trash2} label="Clear run history" hint="Deletes every past run and its results. Saved matches stay.">
+          <Button variant="danger" onClick={onClearHistory}><Trash2 size={14} aria-hidden /> Clear history</Button>
+        </SettingRow>
+      </Card>
+    </div>
+  );
+}
+
+/* ═══════════════════════ app ═══════════════════════ */
+
 function App() {
-  const [theme, setThemeState] = useState(() => document.documentElement.getAttribute('data-theme') || 'light');
+  const [theme, setThemeState] = useState(() => document.documentElement.getAttribute('data-theme') || 'dark');
   const [view, setView] = useState('new');
   const [drawer, setDrawer] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => store.get('ha.rail', false));
+  // Collapsed rail hover par khud khul jaati hai; button sirf use pinned rakhta hai.
+  const [railHover, setRailHover] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const [jd, setJd] = useState('');
-  const [limit, setLimit] = useState(MIN_LIMIT);
+  const [studioTab, setStudioTab] = useState('prompt');
+  const [poolUrl, setPoolUrl] = useState('');
+  const [limit, setLimit] = useState(20);
   const [sources, setSources] = useState(['linkedin', 'indeed']);
+  const [targetTitle, setTargetTitle] = useState('');
+  const [seniority, setSeniority] = useState('any');
   const [useAi, setUseAi] = useState(true);
   const [recommend, setRecommend] = useState(false);   // default off, jaise maanga tha
 
@@ -1625,7 +2433,7 @@ function App() {
   const [agentOpen, setAgentOpen] = useState(false);
 
   const [busy, setBusy] = useState(false);
-  const [stage, setStage] = useState('Searching candidates…');
+  const [stage, setStage] = useState('Sourcing…');
   const [jobs, setJobs] = useState([]);
   const [params, setParams] = useState(null);
   const [jdError, setJdError] = useState('');
@@ -1633,8 +2441,13 @@ function App() {
   const [attached, setAttached] = useState(null);
   const [uploading, setUploading] = useState(false);
 
+  const [health, setHealth] = useState(null);
   const [model, setModel] = useState('deepseek/deepseek-v4-pro');
   const [toasts, setToasts] = useState([]);
+  /* Bell ke liye — har toast yahan bhi girta hai, aur unread count
+     tab tak badhta hai jab tak panel khola na jaaye. */
+  const [log, setLog] = useState([]);
+  const [seen, setSeen] = useState(0);
   /* history / saved / spend — teeno server par rehte hain (Postgres), state sirf
      unka cache hai. Isi liye har mutation ke baad refresh() chalta hai. */
   const [history, setHistory] = useState([]);
@@ -1653,11 +2466,15 @@ function App() {
   const pipelineRef = useRef(null);
 
   const savedKeys = useMemo(() => new Set(saved.map(jobKey)), [saved]);
-  const cost = (limit * Math.max(sources.length, 1) * COST_PER_JOB).toFixed(2);
+  const readySources = sources.length || 1;
+  const profiles = limit * readySources;
+  const cost = (profiles * COST_PER_JOB).toFixed(2);
+  const seconds = SECONDS_PER_SOURCE * readySources + (useAi ? 30 : 0);
   const spend = stats.spend || 0;
   const skills = params?.mustHaveSkills || [];
-  const creditsLeft = PLAN_BUDGET - spend;
+  const creditsLeft = Math.max(0, PLAN_BUDGET - spend);
   const showAgent = recommend && useAi && !busy && jobs.length > 0;
+  const unread = Math.max(0, log.length - seen);
 
   const setTheme = useCallback((mode) => {
     setThemeState(mode);
@@ -1665,25 +2482,28 @@ function App() {
     store.set('ha.theme', mode);
   }, []);
 
-  // user ne explicitly choose nahi kiya to OS ke saath chalte raho
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = (e) => {
-      if (store.get('ha.theme', null)) return;
-      const mode = e.matches ? 'dark' : 'light';
-      setThemeState(mode);
-      document.documentElement.setAttribute('data-theme', mode);
-    };
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
+  const toggleRail = useCallback((next) => { setCollapsed(next); store.set('ha.rail', next); }, []);
 
   const toast = useCallback((type, title, body) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, type, title, body }]);
+    const entry = { id, type, title, body, at: new Date().toISOString() };
+    setToasts((t) => [...t, entry]);
+    setLog((l) => [entry, ...l].slice(0, 30));
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500);
   }, []);
   const dismiss = useCallback((id) => setToasts((t) => t.filter((x) => x.id !== id)), []);
+
+  /* ⌘K / Ctrl+K palette kholta hai — input ke andar bhi kaam karta hai. */
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   /* Server se history + shortlist + stats dobara le aata hai. */
   const refresh = useCallback(async () => {
@@ -1705,6 +2525,7 @@ function App() {
 
   useEffect(() => {
     fetch('/api/health').then((r) => r.json()).then(async (h) => {
+      setHealth(h);
       setModel(h.model);
       const missing = [];
       if (!h.apifyKey) missing.push('APIFY_API_KEY');
@@ -1716,8 +2537,8 @@ function App() {
       if (!db.connected) {
         setHistoryLoading(false);
         toast('warning', 'Database not connected',
-          db.configured ? `${db.error || 'Connection failed'} — history and saved jobs will not be stored.`
-                        : 'DATABASE_URL is not set in .env — history and saved jobs will not be stored.');
+          db.configured ? `${db.error || 'Connection failed'} — history and saved matches will not be stored.`
+                        : 'DATABASE_URL is not set in .env — history and saved matches will not be stored.');
         return;
       }
 
@@ -1756,6 +2577,7 @@ function App() {
       if (!res.ok) { toast('error', 'Unable to parse document', data.error || 'Unsupported or unreadable file.'); return; }
       setJd(data.text);
       setAttached({ name: data.filename, size: file.size, words: data.words });
+      setStudioTab('prompt');
       toast('success', 'Document parsed', `${data.words.toLocaleString()} words extracted locally — no tokens used.`);
     } catch (e) {
       toast('error', 'Upload failed', e.message);
@@ -1763,6 +2585,17 @@ function App() {
       setUploading(false);
     }
   }, [toast]);
+
+  /* URL ko prompt me context line ki tarah jodte hain — page ko crawl nahi
+     karte, isliye UI me bhi wahi likha hai. */
+  const attachUrl = useCallback(() => {
+    const url = poolUrl.trim();
+    if (!url) return;
+    setJd((prev) => (prev.includes(url) ? prev : `${prev.trimEnd()}${prev.trim() ? '\n\n' : ''}Reference posting: ${url}`));
+    setPoolUrl('');
+    setStudioTab('prompt');
+    toast('info', 'Link added to the prompt', url);
+  }, [poolUrl, toast]);
 
   const toggleSource = (id) => setSources((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
@@ -1799,7 +2632,7 @@ function App() {
     const csv = [cols.join(','), ...list.map((j) => cols.map((c) => esc(j[c])).join(','))].join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = `hiring-agent-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `rayn-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
     toast('success', 'CSV exported', `${list.length} rows downloaded.`);
@@ -1808,17 +2641,17 @@ function App() {
   const run = async () => {
     const jobDescription = jd.trim();
     if (jobDescription.length < 20) {
-      setJdError('Add at least 20 characters of job description — paste one or upload a document.');
+      setJdError('Add at least 20 characters of prompt — describe the profile or upload a document.');
       setView('new');
+      setStudioTab('prompt');
       return;
     }
-    if (sources.length === 0) { toast('error', 'No sources selected', 'Pick at least one job source to search.'); return; }
+    if (sources.length === 0) { toast('error', 'No platforms selected', 'Pick at least one sourcing platform.'); return; }
 
     setJdError('');
     setBusy(true);
-    setStage('Searching candidates…');
+    setStage('Sourcing…');
     setJobs([]);
-    setParams(null);
     setPlan(null);          // naya search = purana plan stale
     setPlanError('');
     setDrafts({});          // ...aur purane reach-out drafts bhi
@@ -1827,11 +2660,15 @@ function App() {
     setTimeout(() => pipelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
 
     const apiSource = sources.length === 2 ? 'both' : sources[0];
+    // Seniority prefix + manual title milkar scrape keyword banate hain.
+    const prefix = SENIORITY.find((s) => s.id === seniority)?.prefix || '';
+    const chosen = targetTitle.trim();
+    const override = [prefix, chosen].filter(Boolean).join(' ').trim();
 
     try {
       const res = await fetch('/api/search', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobDescription, limit, source: apiSource, useAi }),
+        body: JSON.stringify({ jobDescription, limit, source: apiSource, useAi, titleOverride: override || null }),
       });
 
       if (!res.ok) {
@@ -1856,18 +2693,19 @@ function App() {
 
           if (ev.type === 'progress') {
             // stage text asli stream stages se aata hai, timer se nahi
-            if (ev.stage === 'parse') setStage('Analyzing job description…');
-            else if (ev.stage === 'score') setStage('Ranking candidates…');
-            else setStage('Searching candidates…');
+            if (ev.stage === 'parse') setStage('Reading prompt…');
+            else if (ev.stage === 'score') setStage('Ranking profiles…');
+            else setStage('Sourcing…');
             if (ev.isError) toast('warning', 'Pipeline warning', ev.message);
           } else if (ev.type === 'search') {
-            // Backend ne searches table me row bana di — saved jobs aur plan
+            // Backend ne searches table me row bana di — saved matches aur plan
             // isi id se jud jaate hain.
             setSearchId(ev.searchId);
           } else if (ev.type === 'params') {
             setParams(ev.params);
+            if (!targetTitle.trim() && ev.params?.title) setTargetTitle(ev.params.title);
           } else if (ev.type === 'partial') {
-            // scraping ho gayi, scoring baaki — table abhi bhar do
+            // sourcing ho gayi, scoring baaki — table abhi bhar do
             setJobs(ev.jobs);
             if (ev.params) setParams(ev.params);
           } else if (ev.type === 'error') {
@@ -1878,8 +2716,8 @@ function App() {
             if (ev.searchId) setSearchId(ev.searchId);
             // Backend ne run ko already save kar diya hai — bas dobara padh lete hain.
             refresh();
-            toast('success', `${ev.jobs.length} roles matched`,
-              useAi ? 'Ranked by fit against your job description.' : 'AI ranking was off — results are unranked.');
+            toast('success', `${ev.jobs.length} profiles matched`,
+              useAi ? 'Ranked by fit against your prompt.' : 'AI ranking was off — results are unranked.');
           }
         }
       }
@@ -1928,7 +2766,7 @@ function App() {
   const generateOutreach = useCallback(async (job) => {
     const profile = jd.trim();
     if (profile.length < 20) {
-      setOutreachError('Add your resume or profile under New Search first — the message is written from it.');
+      setOutreachError('Add your prompt or resume under New Search first — the message is written from it.');
       return;
     }
 
@@ -1960,7 +2798,7 @@ function App() {
   }, []);
 
   /* Purani run kholna = DB se poora record wapas laana: jobs, JD, params aur
-     agar plan bana tha to wo bhi. Pehle sirf browser me pada adhoora copy milta tha. */
+     agar plan bana tha to wo bhi. */
   const openHistory = async (h) => {
     try {
       const full = await api.get(`/api/searches/${h.id}`);
@@ -1973,7 +2811,7 @@ function App() {
       if (full.jobDescription) setJd(full.jobDescription);
       setView('matches');
     } catch (e) {
-      toast('error', 'Could not open that search', e.message);
+      toast('error', 'Could not open that run', e.message);
     }
   };
 
@@ -1981,7 +2819,7 @@ function App() {
     try {
       await api.del(`/api/searches/${h.id}`);
       if (searchId === h.id) { setJobs([]); setParams(null); setSearchId(null); }
-      toast('info', 'Search deleted', h.title);
+      toast('info', 'Run deleted', h.title);
       refresh();
     } catch (e) {
       toast('error', 'Could not delete', e.message);
@@ -1992,7 +2830,7 @@ function App() {
     try {
       const out = await api.del('/api/searches');
       setJobs([]); setParams(null); setSearchId(null);
-      toast('info', 'History cleared', `${out.deleted} search${out.deleted === 1 ? '' : 'es'} removed.`);
+      toast('info', 'History cleared', `${out.deleted} run${out.deleted === 1 ? '' : 's'} removed.`);
       refresh();
     } catch (e) {
       toast('error', 'Could not clear history', e.message);
@@ -2000,82 +2838,87 @@ function App() {
   };
 
   const titles = {
-    overview: ['Overview', 'Your searches, matches, and usage at a glance.'],
-    new: ['New Candidate Search', 'Find and rank the most relevant candidates from your job description.'],
-    searches: ['Searches', 'Every search you have run in this browser.'],
-    matches: ['Matches', 'The ranked pipeline from your most recent search.'],
-    saved: ['Saved', 'Roles you shortlisted for a closer look.'],
-    contacts: ['Contacts', `Who to message at each company — founder under ${FOUNDER_MAX_EMPLOYEES} employees, HR above it.`],
+    overview: ['Overview', 'Your runs, matches, and usage at a glance.'],
+    new: ['Launch New Candidate Search', 'Describe your ideal profile, select sourcing channels, and let RAYN rank top talent.'],
+    searches: ['Talent Pool', 'Every sourcing run RAYN has completed for you.'],
+    matches: ['Pipeline', 'The ranked pipeline from your most recent run.'],
+    saved: ['Saved Matches', 'Profiles you shortlisted for a closer look.'],
+    contacts: ['Outreach', `Who to message at each company — founder under ${FOUNDER_MAX_EMPLOYEES} employees, HR above it.`],
+    analytics: ['Analytics', 'Match quality, sourcing volume, and compute spend.'],
+    settings: ['Settings', 'Model, keys, storage and appearance.'],
   };
   const [pageTitle, pageSub] = titles[view];
+  const navItem = NAV.find((n) => n.id === view);
 
   const sidebarProps = { view, setView, savedCount: saved.length, contactCount: Object.keys(drafts).length, spend };
 
   return (
-    <div className="flex h-full overflow-hidden bg-app">
-      <aside className="hidden lg:block"><Sidebar {...sidebarProps} /></aside>
+    <div className="relative z-10 flex h-full overflow-hidden">
+      {/* Rail hover par khulti hai aur content ko saath me sarka deti hai -
+          overlay nahi karti, warna peeche ka content dhak jaata hai. Width ki
+          transition Sidebar ke andar hai, isliye shift smooth rehta hai. */}
+      <aside
+        className="hidden shrink-0 lg:block"
+        onMouseEnter={() => setRailHover(true)}
+        onMouseLeave={() => setRailHover(false)}
+      >
+        <Sidebar {...sidebarProps} collapsed={collapsed && !railHover} setCollapsed={toggleRail} navId="rail" />
+      </aside>
 
-      {drawer && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-overlay" onClick={() => setDrawer(false)} aria-hidden />
-          <div className="fade-up absolute left-0 top-0 h-full shadow-lg">
-            <Sidebar {...sidebarProps} onNavigate={() => setDrawer(false)} />
+      <AnimatePresence>
+        {drawer && (
+          <div className="fixed inset-0 z-40 lg:hidden">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        className="absolute inset-0 bg-overlay backdrop-blur-sm" onClick={() => setDrawer(false)} aria-hidden />
+            <motion.div initial={{ x: -280 }} animate={{ x: 0 }} exit={{ x: -280 }}
+                        transition={{ type: 'spring', stiffness: 340, damping: 34 }}
+                        className="absolute left-0 top-0 h-full shadow-lg">
+              <Sidebar {...sidebarProps} collapsed={false} navId="drawer" onNavigate={() => setDrawer(false)} />
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="themed flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-6">
-          <button onClick={() => setDrawer(true)} aria-label="Open navigation"
-                  className={`-ml-1 rounded-md p-2 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg lg:hidden ${ring}`}>
-            <Menu size={17} />
-          </button>
-
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-h1 font-semibold text-fg">{pageTitle}</h1>
-            <p className="hidden truncate text-sm text-fg-sec sm:block">{pageSub}</p>
-          </div>
-
-          {/* model + credits secondary controls hain — borderless aur muted,
-              taaki page title se compete na karein */}
-          <div className="flex shrink-0 items-center gap-3">
-            <span className="hidden items-center gap-1.5 text-xs font-medium text-fg-muted md:inline-flex">
-              <Sparkles size={12} aria-hidden /> {model}
-            </span>
-            {!dbOk && (
-              <span title="History and saved jobs are not being stored"
-                    className="inline-flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2 py-1 text-xs font-medium text-warning-text">
-                <AlertTriangle size={11} aria-hidden /> DB offline
-              </span>
-            )}
-            <span className={`hidden items-center gap-1.5 text-xs font-medium sm:inline-flex ${
-              creditsLeft < 1 ? 'rounded-md border border-warning-border bg-warning-subtle px-2 py-1 text-warning-text' : 'text-fg-muted'
-            }`}>
-              {creditsLeft < 1 && <AlertTriangle size={11} aria-hidden />}
-              <span className="tabular-nums">${creditsLeft.toFixed(2)}</span> credits
-            </span>
-            <ThemeSwitch theme={theme} setTheme={setTheme} />
-            <div aria-hidden className="grid h-8 w-8 place-items-center rounded-full border border-line bg-surface-hover text-xs font-semibold text-fg-sec" title="Anshu">A</div>
-          </div>
-        </header>
+        <TopBar theme={theme} setTheme={setTheme} model={model} creditsLeft={creditsLeft} dbOk={dbOk}
+                log={log} unread={unread} markRead={() => setSeen(log.length)}
+                viewLabel={navItem?.label} ViewIcon={navItem?.icon}
+                onOpenNav={() => setDrawer(true)} onOpenPalette={() => setPaletteOpen(true)} />
 
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[1280px] px-4 py-5 sm:px-6 sm:py-6">
+          <div className="mx-auto max-w-[1280px] px-4 pt-6 pb-36 sm:px-6 sm:pt-8">
+
+            <div className="mb-6">
+              <h1 className="text-display font-bold tracking-tight text-fg">{pageTitle}</h1>
+              <p className="mt-1.5 max-w-2xl text-body text-fg-sec">{pageSub}</p>
+            </div>
 
             {view === 'new' && (
-              <div className="space-y-6">
-                <JdSection jd={jd} setJd={setJd} attached={attached} setAttached={setAttached}
-                           uploading={uploading} uploadFile={uploadFile} error={jdError} />
-                <ConfigSection limit={limit} setLimit={setLimit} sources={sources} toggleSource={toggleSource}
-                               useAi={useAi} setUseAi={setUseAi} recommend={recommend} setRecommend={setRecommend}
-                               cost={cost} busy={busy} stage={stage} onRun={run} />
+              <div className="space-y-8">
+                <PromptStudio
+                  jd={jd} setJd={setJd} attached={attached} setAttached={setAttached}
+                  uploading={uploading} uploadFile={uploadFile} error={jdError}
+                  tab={studioTab} setTab={setStudioTab}
+                  poolUrl={poolUrl} setPoolUrl={setPoolUrl} onAttachUrl={attachUrl}
+                />
+
+                <PipelineConfig
+                  limit={limit} setLimit={setLimit} cost={cost}
+                  sources={sources} toggleSource={toggleSource}
+                  targetTitle={targetTitle} setTargetTitle={setTargetTitle} detected={params?.title}
+                  seniority={seniority} setSeniority={setSeniority}
+                  useAi={useAi} setUseAi={setUseAi} recommend={recommend} setRecommend={setRecommend}
+                />
+
+                <ActionDock profiles={profiles} cost={cost} seconds={seconds} busy={busy} stage={stage}
+                            blocked={sources.length === 0} onLaunch={run} />
+
                 <section ref={pipelineRef} aria-labelledby="pipe-head" className="scroll-mt-6">
-                  <SectionHead step="3" title={<span id="pipe-head">Candidate pipeline</span>}
-                               description={jobs.length ? 'Ranked by how closely each posting matches your JD.' : 'Results land here once the search finishes.'} />
+                  <SectionHead title={<span id="pipe-head">Candidate pipeline</span>}
+                               description={jobs.length ? 'Ranked by how closely each profile matches your prompt.' : 'Results land here once the pipeline finishes.'} />
                   <Pipeline jobs={jobs} skills={skills} busy={busy} stage={stage}
                             savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)}
                             drafts={drafts} onReachOut={openOutreach} />
-
                 </section>
               </div>
             )}
@@ -2088,8 +2931,13 @@ function App() {
                         savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)}
                         drafts={drafts} onReachOut={openOutreach} />
             )}
-
             {view === 'contacts' && <Contacts drafts={drafts} jobs={jobs} onOpen={openOutreach} />}
+            {view === 'analytics' && <Analytics stats={stats} history={history} jobs={jobs} saved={saved} spend={spend} />}
+            {view === 'settings' && (
+              <SettingsView health={health} theme={theme} setTheme={setTheme}
+                            creditsLeft={creditsLeft} onClearHistory={clearHistory} />
+            )}
+
             {view === 'saved' && (
               saved.length === 0
                 ? <EmptyState Icon={Bookmark} title="Nothing saved yet" body="Use Save on any result to shortlist it here." />
@@ -2110,6 +2958,9 @@ function App() {
           </div>
         </main>
       </div>
+
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)}
+                      go={setView} history={history} saved={saved} openHistory={openHistory} />
 
       {/* Kai sirf tab dikhta hai jab recommendations on hon aur results maujood hon */}
       {showAgent && (

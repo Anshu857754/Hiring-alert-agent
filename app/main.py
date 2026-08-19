@@ -43,6 +43,9 @@ class SearchRequest(BaseModel):
     limit: int = config.MIN_LIMIT
     source: Literal["both", "linkedin", "indeed"] = "both"
     useAi: bool = True
+    # UI ka "Target role" field + seniority prefix. Set ho to LLM ka nikala
+    # hua title ignore karke yahi keyword scrape hota hai.
+    titleOverride: str | None = None
     # Chhote batches parallel me chalte hain, to wall-clock time sabse dheeme
     # single call se bandha hota hai — 10 par wo call 15 se choti hoti hai.
     batchSize: int = Field(default=10, ge=5, le=30)
@@ -192,15 +195,22 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
 
             params = {"title": None, "location": "India", "country": "IN", "summary": "", "mustHaveSkills": []}
 
+            override = (req.titleOverride or "").strip()
+
             if req.useAi:
                 await progress("parse", f"{MODEL_ID} is reading the job description...")
                 extracted = await extract_search_params(job_description, config.OPENROUTER_API_KEY)
                 params = extracted["params"]
-                await progress("parse", f"Search built: \"{params['title']}\" in {params['location']} ({params['country']})")
             else:
                 # AI off ho to JD ki pehli line ko hi search keyword maan lete hain.
                 params["title"] = job_description.split("\n")[0].strip()[:60]
-                await progress("parse", f"AI off — keyword: \"{params['title']}\"")
+
+            # User ka apna title hamesha jeetta hai — model ka guess uske upar
+            # nahi chadhta. Location aur skills waise hi rehte hain.
+            if override:
+                params["title"] = override[:80]
+
+            await progress("parse", f"Search built: \"{params['title']}\" in {params['location']} ({params['country']})")
 
             await send({"type": "params", "params": params, "limit": limit})
 
