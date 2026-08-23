@@ -26,16 +26,53 @@ DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "8"))
 APP_USERNAME = os.getenv("APP_USERNAME", "admin").strip() or "admin"
 APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
 
+# Sender account ki LinkedIn cookie isse encrypt hoti hai (app/crypto.py).
+# Khaali ho to cookie save hi nahi hoti — plain text me rakhne se behtar hai
+# feature band rahe. Koi bhi lambi random string chalegi.
+APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "").strip()
+
+# Session cookie par Secure flag. Local dev http par chalta hai isliye default
+# off; https deploy (Render) par 1 kar do warna cookie plain http par bhi jaayegi.
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes")
+
 # Render/Railway jaise hosts apna PORT env var dete hain.
 PORT = int(os.getenv("PORT", "3000"))
 
 MIN_LIMIT = 10
 MAX_LIMIT = 30
 
-# Reach-out ka rule: itne se kam employees wali company me seedha founder ko
-# likho, usse badi me HR/recruiter ko. Company size na pata chale to HR —
+# Reach-out ka rule: itne se kam employees wali company me seedha founder/CTO
+# ko likho, usse badi me HR/recruiter ko. Company size na pata chale to HR —
 # bade organisation ke CEO ko DM karna ulta padta hai.
-FOUNDER_MAX_EMPLOYEES = int(os.getenv("FOUNDER_MAX_EMPLOYEES", "150"))
+FOUNDER_MAX_EMPLOYEES = int(os.getenv("FOUNDER_MAX_EMPLOYEES", "50"))
+
+# ── decision makers + connection requests ──────────────────────────
+# Discovery cookie ke bina chalti hai (public profiles), isliye default actor
+# wahi hai. Sending ke liye cookie lazmi hai — koi official API nahi hai.
+PEOPLE_ACTOR = os.getenv("PEOPLE_ACTOR", "apt_marble/linkedin-decision-makers-scraper-ceos-founders-executives").strip()
+CONNECT_ACTOR = os.getenv("CONNECT_ACTOR", "data_link_miner/linkedin-network-connection-request").strip()
+
+# 'apify' ya 'unipile'. Unipile paid hai par asal me chalta hai; Apify ke
+# connect actors saste hain aur bharose ke laayak kam. app/connect.py dono
+# ko ek hi interface ke peeche rakhta hai.
+CONNECT_PROVIDER = os.getenv("CONNECT_PROVIDER", "apify").strip() or "apify"
+UNIPILE_DSN = os.getenv("UNIPILE_DSN", "").strip()
+UNIPILE_API_KEY = os.getenv("UNIPILE_API_KEY", "").strip()
+
+# Ek "Send" click me itne se zyada invite nahi. UI 5-7 par bana hai; ye uski
+# hard ceiling hai taaki koi galti se 50 select kar ke na bhej de.
+MAX_BATCH_INVITES = int(os.getenv("MAX_BATCH_INVITES", "10"))
+# LinkedIn ki apni limit weekly ~100-200 hai. Hum uske aas-paas bhi nahi
+# jaate — restriction ek baar lag gayi to account wapas nahi milta.
+DAILY_INVITE_CAP = int(os.getenv("DAILY_INVITE_CAP", "20"))
+WEEKLY_INVITE_CAP = int(os.getenv("WEEKLY_INVITE_CAP", "100"))
+# Do invites ke beech ka gap (seconds) — burst sabse aasaan detection signal hai.
+INVITE_DELAY_SECONDS = float(os.getenv("INVITE_DELAY_SECONDS", "25"))
+
+# Free account par personalised note ~5/month par khatam ho jaata hai aur 200
+# char me katta hai; Premium par 300. Isliye note yahin trim hota hai.
+NOTE_LIMIT_FREE = 200
+NOTE_LIMIT_PREMIUM = 300
 
 # Apify credits ka mota-mota estimate — frontend pehle khud jodta tha,
 # ab ek hi jagah rehta hai taaki DB me likha hua kharcha bhi wahi ho.

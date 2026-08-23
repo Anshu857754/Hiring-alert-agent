@@ -349,7 +349,8 @@ import {
   CheckCircle2, ChevronDown, Clock, Command, Copy, Database, Download, ExternalLink, FileText, Github,
   Globe, GraduationCap, History, Info, KeyRound, Layers, Link2, Loader2, MapPin, Menu, Minus, Moon,
   PanelLeftClose, PanelLeftOpen, Paperclip, Plus, RefreshCw, Rocket, Search, Send, Settings,
-  SlidersHorizontal, Sparkles, Sun, Target, Trash2, TrendingUp, Upload, UserRound, Users, X, XCircle, Zap,
+  ShieldCheck, SlidersHorizontal, Sparkles, Sun, Target, Trash2, TrendingUp, Upload, UserPlus, UserRound,
+  Users, X, XCircle, Zap,
 } from 'https://esm.sh/lucide-react@0.462.0?deps=react@18.3.1';
 
 /* ═══════════════════════ constants ═══════════════════════ */
@@ -359,7 +360,10 @@ const MIN_LIMIT = 10;   // app/config.py se match
 const MAX_LIMIT = 30;
 // Sirf UI text ke liye — asli faisla backend (app/outreach.py) leta hai,
 // draft khud apna threshold saath laata hai.
-const FOUNDER_MAX_EMPLOYEES = 150;
+const FOUNDER_MAX_EMPLOYEES = 50;
+// Ek "Send" click me itne se zyada invite nahi — app/config.py ki hard ceiling
+// se match karta hai. 5-7 hi theek hai; LinkedIn burst ko turant pakadta hai.
+const MAX_BATCH_INVITES = 10;
 const STEP = 5;
 const PLAN_BUDGET = 5;
 // Ek scrape+score run roughly itne seconds leta hai — dock me dikhta hai.
@@ -449,6 +453,10 @@ const api = {
     if (!res.ok) {
       const err = new Error(data.error || data.detail || `Request failed (${res.status})`);
       err.status = res.status;
+      // Session expire / logout — App isko sunta hai aur login screen dikha deta hai.
+      if (res.status === 401 && !path.startsWith('/api/auth/')) {
+        window.dispatchEvent(new CustomEvent('ha:signed-out'));
+      }
       throw err;
     }
     return data;
@@ -686,10 +694,17 @@ function RaynMark({ size = 32, className = '' }) {
 /* Nav ka active pill Framer Motion se ek item se doosre par slide karta hai.
    layoutId per-instance unique hai — mobile drawer aur desktop rail dono
    ek saath mount ho sakte hain. */
-function Sidebar({ view, setView, savedCount, contactCount, spend, collapsed, setCollapsed, navId = 'rail', onNavigate }) {
+function Sidebar({ view, setView, savedCount, contactCount, spend, collapsed, setCollapsed,
+                   navId = 'rail', onNavigate, me, onLogout }) {
   const left = Math.max(0, PLAN_BUDGET - spend);
   const pct = Math.min(100, (spend / PLAN_BUDGET) * 100);
   const low = left < 1;
+  const label = me?.name || me?.email || 'Account';
+  // Initials: "Anshu Kumar" -> AK, "alice@x.com" -> AL
+  const initials = (me?.name
+    ? me.name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('')
+    : (me?.email || 'A').slice(0, 2)
+  ).toUpperCase();
 
   return (
     <div className={`themed relative flex h-full shrink-0 flex-col border-r border-line bg-sidebar backdrop-blur-xl transition-[width] duration-300 ease-out ${collapsed ? 'w-[76px]' : 'w-[248px]'}`}>
@@ -750,17 +765,23 @@ function Sidebar({ view, setView, savedCount, contactCount, spend, collapsed, se
       {/* ── profile + compute credits ── */}
       <div className={`shrink-0 border-t border-line-subtle p-3 ${collapsed ? 'px-2.5' : ''}`}>
         {collapsed ? (
-          <div className="grid place-items-center py-1" title={`Anshu Kumar — Pro Agent Plan, $${left.toFixed(2)} left`}>
-            <span aria-hidden className="accent-grad grid h-9 w-9 place-items-center rounded-full text-xs font-bold text-white">AK</span>
+          <div className="grid place-items-center py-1" title={`${label} — $${left.toFixed(2)} left`}>
+            <span aria-hidden className="accent-grad grid h-9 w-9 place-items-center rounded-full text-xs font-bold text-white">{initials}</span>
           </div>
         ) : (
           <div className="themed rounded-xl border border-line bg-surface-sunken p-3">
             <div className="flex items-center gap-2.5">
-              <span aria-hidden className="accent-grad grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-bold text-white">AK</span>
+              <span aria-hidden className="accent-grad grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-bold text-white">{initials}</span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-fg">Anshu Kumar</p>
-                <p className="truncate text-xs font-medium text-brand-text">Pro Agent Plan</p>
+                <p className="truncate text-sm font-semibold text-fg">{label}</p>
+                <p className="truncate text-xs font-medium text-fg-muted">{me?.email}</p>
               </div>
+              {onLogout && (
+                <button type="button" onClick={onLogout} aria-label="Sign out" title="Sign out"
+                        className={`shrink-0 rounded-md p-1.5 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg ${ring}`}>
+                  <ArrowRight size={14} aria-hidden />
+                </button>
+              )}
             </div>
 
             <div className="mt-3 flex items-center justify-between gap-2">
@@ -1807,7 +1828,7 @@ function AgentDock({ open, setOpen, plan, loading, error, jobs, onGenerate, onCl
 const FOUNDER = 'founder';
 
 const targetLook = (target) => (target === FOUNDER
-  ? { Icon: UserRound, label: 'Founder / CEO', chip: 'border-brand-border bg-brand-subtle text-brand-text' }
+  ? { Icon: UserRound, label: 'Founder / CTO', chip: 'border-brand-border bg-brand-subtle text-brand-text' }
   : { Icon: Briefcase, label: 'HR / Recruiter', chip: 'border-info-border bg-info-subtle text-info-text' });
 
 function TargetChip({ target }) {
@@ -1959,87 +1980,288 @@ const CONTACT_TABS = [
   { id: 'hr', label: 'HR' },
 ];
 
-function Contacts({ drafts, jobs, onOpen }) {
+/* Ek insaan ki row. Checkbox tabhi chalta hai jab invite ja sakta ho —
+   jo ja chuka hai use dobara bhejna sabse tez restriction laata hai. */
+function ContactRow({ contact, checked, disabled, live, onToggle }) {
+  const sent = contact.requestStatus === 'sent';
+  /* Live event DB se aage hota hai — batch ke beech row ka status usi se
+     padhte hain, warna result aane ke baad row khaali dikhti. */
+  const state = live?.status || contact.requestStatus;
+  const failed = state === 'failed';
+  const error = live?.error || contact.requestError;
+
+  return (
+    <li className={`px-4 py-3 transition-colors ${sent ? 'opacity-70' : 'hover:bg-surface-hover'}`}>
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox" checked={checked} disabled={disabled || sent}
+          onChange={() => onToggle(contact.id)}
+          aria-label={`Select ${contact.fullName}`}
+          className={`mt-1 h-4 w-4 shrink-0 cursor-pointer rounded border-line-control accent-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-40 ${ring}`}
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <TargetChip target={contact.target} />
+            <a href={contact.profileUrl} target="_blank" rel="noopener"
+               className={`truncate text-h3 font-semibold text-fg hover:text-brand-text ${ring}`}>
+              {contact.fullName}
+            </a>
+            <ExternalLink size={11} aria-hidden className="shrink-0 text-fg-muted" />
+          </div>
+          <p className="mt-0.5 truncate text-sm text-fg-muted">
+            {contact.headline || contact.roleTitle || 'No headline'}
+          </p>
+          <p className="mt-0.5 truncate text-xs text-fg-muted">
+            {contact.company || 'Unknown company'}{contact.location ? ` · ${contact.location}` : ''}
+          </p>
+          {failed && error && (
+            <p className="mt-1 text-xs text-error-text">Last attempt failed: {error}</p>
+          )}
+        </div>
+
+        <div className="shrink-0">
+          {state === 'sending' && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-text">
+              <Loader2 size={12} aria-hidden className="animate-spin" /> Sending
+            </span>
+          )}
+          {state === 'waiting' && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-fg-muted">
+              <Clock size={12} aria-hidden /> Queued
+            </span>
+          )}
+          {state === 'sent' && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-success-border bg-success-subtle px-2 py-0.5 text-xs font-semibold text-success-text">
+              <Check size={11} strokeWidth={3} aria-hidden /> Invited
+            </span>
+          )}
+          {state === 'failed' && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-error-border bg-error-subtle px-2 py-0.5 text-xs font-semibold text-error-text">
+              <XCircle size={11} aria-hidden /> Failed
+            </span>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function Contacts({ drafts, jobs, contacts, sender, discovering, send, maxBatch, onOpen, onDiscover, onSend, go }) {
   const [tab, setTab] = useState('all');
+  const [picked, setPicked] = useState(() => new Set());
+  const [note, setNote] = useState('');
+  const [noteTouched, setNoteTouched] = useState(false);
+
   const all = useMemo(() => Object.values(drafts), [drafts]);
   const founders = all.filter((d) => d.target === FOUNDER).length;
   const rows = tab === 'all' ? all : all.filter((d) => (tab === FOUNDER ? d.target === FOUNDER : d.target !== FOUNDER));
 
+  const noteLimit = sender?.noteLimit || 200;
+  const canSend = !!sender && sender.hasCookie && !send.active;
+
+  /* Note ka default pehle draft se aata hai — user ne khud likh diya to
+     uske upar kabhi nahi chadhta. */
+  useEffect(() => {
+    if (noteTouched) return;
+    const first = contacts.find((c) => picked.has(c.id));
+    const draft = first && all.find((d) => d.company === first.company);
+    if (draft?.connectionNote) setNote(draft.connectionNote.slice(0, noteLimit));
+  }, [picked, contacts, all, noteLimit, noteTouched]);
+
+  const toggle = (id) => setPicked((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else if (next.size < maxBatch) next.add(id);
+    return next;
+  });
+
+  const sendable = contacts.filter((c) => c.requestStatus !== 'sent');
+  const selected = [...picked].filter((id) => sendable.some((c) => c.id === id));
+
+  const fire = async () => {
+    await onSend(selected, note.trim());
+    setPicked(new Set());
+  };
+
   if (!all.length) {
     return (
       <EmptyState Icon={Send} title="No one drafted yet"
-                  body={`Hit Reach out on any match. Under ${FOUNDER_MAX_EMPLOYEES} employees the message goes to the founder; above that, to HR.`} />
+                  body={`Hit Reach out on any match. Under ${FOUNDER_MAX_EMPLOYEES} employees the message goes to the founder or CTO; above that, to HR.`} />
     );
   }
 
   const counts = { all: all.length, [FOUNDER]: founders, hr: all.length - founders };
 
   return (
-    <Card className="overflow-hidden">
-      <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle px-4 py-2.5">
-        <h3 className="mr-1 text-sm font-semibold text-fg">
-          {rows.length} <span className="font-normal text-fg-muted">of {all.length} drafted</span>
-        </h3>
-        <div className="flex gap-1">
-          {CONTACT_TABS.map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)} aria-pressed={tab === t.id}
-                    className={`h-8 rounded-md px-2.5 text-sm font-medium transition-colors ${ring} ${
-                      tab === t.id ? 'bg-surface-selected text-brand-text' : 'text-fg-muted hover:bg-surface-hover hover:text-fg'
-                    }`}>
-              {t.label} <span className="tabular-nums">({counts[t.id]})</span>
-            </button>
-          ))}
+    <div className="space-y-6">
+      {/* ── sender strip ── */}
+      <Card className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-surface-sunken text-fg-muted">
+            <UserPlus size={15} />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-fg">
+              {sender ? `Sending as ${sender.label}` : 'No sender account yet'}
+            </p>
+            <p className="truncate text-xs text-fg-muted">
+              {sender
+                ? `${Math.max(0, (sender.dailyCap || 0) - (sender.sentToday || 0))} invites left today · notes cut off at ${noteLimit} characters`
+                : 'Add your LinkedIn account in Settings before you can send connection requests.'}
+            </p>
+          </div>
         </div>
-      </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {sender && <SenderStatusBadge status={sender.status} />}
+          <Button size="sm" onClick={() => go('settings')}>
+            <Settings size={12} aria-hidden /> {sender ? 'Manage' : 'Add account'}
+          </Button>
+        </div>
+      </Card>
 
-      {rows.length === 0 ? (
-        <div className="px-6 py-10 text-center">
-          <p className="text-h3 font-medium text-fg">Nothing in this group yet</p>
-          <p className="mt-1 text-sm text-fg-muted">
-            {tab === FOUNDER
-              ? `No company you drafted came out under ${FOUNDER_MAX_EMPLOYEES} employees.`
-              : 'Every company you drafted so far is small enough to go straight to the founder.'}
-          </p>
+      {/* ── companies (drafts) ── */}
+      <Card className="overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle px-4 py-2.5">
+          <h3 className="mr-1 text-sm font-semibold text-fg">
+            {rows.length} <span className="font-normal text-fg-muted">of {all.length} drafted</span>
+          </h3>
+          <div className="flex gap-1">
+            {CONTACT_TABS.map((t) => (
+              <button key={t.id} onClick={() => setTab(t.id)} aria-pressed={tab === t.id}
+                      className={`h-8 rounded-md px-2.5 text-sm font-medium transition-colors ${ring} ${
+                        tab === t.id ? 'bg-surface-selected text-brand-text' : 'text-fg-muted hover:bg-surface-hover hover:text-fg'
+                      }`}>
+                {t.label} <span className="tabular-nums">({counts[t.id]})</span>
+              </button>
+            ))}
+          </div>
         </div>
-      ) : (
-        <ul className="divide-y divide-line-subtle">
-          {rows.map((d) => {
-            /* asli posting mil jaaye to redraft ho sakta hai, warna sirf padhne ke liye */
-            const job = jobs.find((j) => jobKey(j) === d.jobKey)
-              || { title: d.jobTitle, company: d.company, __key: d.jobKey, __stub: true };
-            return (
-              <li key={d.jobKey} className="px-4 py-3 transition-colors hover:bg-surface-hover">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <TargetChip target={d.target} />
-                      <h3 className="truncate text-h3 font-semibold text-fg">{d.company || 'Unknown company'}</h3>
+
+        {rows.length === 0 ? (
+          <div className="px-6 py-10 text-center">
+            <p className="text-h3 font-medium text-fg">Nothing in this group yet</p>
+            <p className="mt-1 text-sm text-fg-muted">
+              {tab === FOUNDER
+                ? `No company you drafted came out under ${FOUNDER_MAX_EMPLOYEES} employees.`
+                : 'Every company you drafted so far is small enough to go straight to the founder.'}
+            </p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-line-subtle">
+            {rows.map((d) => {
+              const job = jobs.find((j) => jobKey(j) === d.jobKey)
+                || { title: d.jobTitle, company: d.company, __key: d.jobKey, __stub: true };
+              const found = contacts.filter((c) => c.company === d.company).length;
+              const loading = discovering === d.jobKey;
+
+              return (
+                <li key={d.jobKey} className="px-4 py-3 transition-colors hover:bg-surface-hover">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <TargetChip target={d.target} />
+                        <h3 className="truncate text-h3 font-semibold text-fg">{d.company || 'Unknown company'}</h3>
+                        {found > 0 && (
+                          <span className="rounded-md border border-line bg-surface-hover px-1.5 text-xs font-semibold tabular-nums text-fg-sec">
+                            {found} found
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm text-fg-muted">
+                        {d.jobTitle || 'Untitled role'} · {d.targetRole || targetLook(d.target).label} · {sizeLine(d)}
+                        {d.at ? ` · ${timeAgo(d.at)}` : ''}
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm text-fg-muted">
-                      {d.jobTitle || 'Untitled role'} · {d.targetRole || targetLook(d.target).label} · {sizeLine(d)}
-                      {d.at ? ` · ${timeAgo(d.at)}` : ''}
-                    </p>
-                    {d.message && <p className="mt-2 line-clamp-2 text-sm text-fg-sec">{d.message}</p>}
-                  </div>
 
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    {d.searchUrl && (
-                      <a href={d.searchUrl} target="_blank" rel="noopener"
-                         className={`inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-surface px-3 text-sm font-medium text-fg-sec shadow-sm transition-colors hover:border-line-strong hover:bg-surface-hover ${ring}`}>
-                        Find person <ExternalLink size={12} aria-hidden />
-                      </a>
-                    )}
-                    <Button size="sm" variant="primary" onClick={() => onOpen(job)}>
-                      <Send size={13} aria-hidden /> Open draft
-                    </Button>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <Button size="sm" variant="primary" onClick={() => onDiscover(d)} disabled={!!discovering}>
+                        {loading
+                          ? <><Loader2 size={13} aria-hidden className="animate-spin" /> Searching…</>
+                          : <><Users size={13} aria-hidden /> Find people</>}
+                      </Button>
+                      <Button size="sm" onClick={() => onOpen(job)}>
+                        <Send size={13} aria-hidden /> Draft
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+
+      {/* ── discovered people + bulk send ── */}
+      {contacts.length > 0 && (
+        <Card className="overflow-hidden">
+          <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle px-4 py-2.5">
+            <Users size={14} aria-hidden className="text-fg-muted" />
+            <h3 className="text-sm font-semibold text-fg">
+              Decision makers <span className="font-normal text-fg-muted">({contacts.length})</span>
+            </h3>
+            <span className="ml-auto text-xs tabular-nums text-fg-muted">
+              {selected.length} of {maxBatch} selected
+            </span>
+          </div>
+
+          <ul className="divide-y divide-line-subtle">
+            {contacts.map((c) => (
+              <ContactRow key={c.id} contact={c} checked={picked.has(c.id)}
+                          disabled={send.active || (!picked.has(c.id) && picked.size >= maxBatch)}
+                          live={send.live[c.id]} onToggle={toggle} />
+            ))}
+          </ul>
+
+          {/* ── note + send ── */}
+          <div className="space-y-3 border-t border-line bg-surface-sunken px-4 py-4">
+            <div>
+              <FieldLabel htmlFor="invite-note"
+                          aside={<span className={`text-xs tabular-nums ${note.length > noteLimit ? 'text-error-text' : 'text-fg-muted'}`}>
+                            {note.length}/{noteLimit}
+                          </span>}>
+                Connection note
+              </FieldLabel>
+              <textarea
+                id="invite-note" rows={3} value={note}
+                onChange={(e) => { setNote(e.target.value); setNoteTouched(true); }}
+                placeholder="Hi — I saw you are hiring for a backend role. I have been building FastAPI services for 3 years and would love to connect."
+                className={`w-full resize-y rounded-md border border-line bg-input px-3 py-2 text-sm leading-6 text-fg shadow-sm ${ring}`}
+              />
+              <p className="mt-1.5 text-xs text-fg-muted">
+                The same note goes to everyone selected. Anything past {noteLimit} characters is trimmed before sending.
+              </p>
+            </div>
+
+            {send.active && (
+              <InlineStatus type="info">
+                {send.message || 'Sending…'} Requests go out one at a time with a pause in between — keep this tab open.
+              </InlineStatus>
+            )}
+            {!send.active && send.error && <InlineStatus type="error">{send.error}</InlineStatus>}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="primary" onClick={fire} disabled={!canSend || selected.length === 0 || note.length > noteLimit}>
+                {send.active
+                  ? <><Loader2 size={13} aria-hidden className="animate-spin" /> Sending {send.done}/{send.total}…</>
+                  : <><UserPlus size={13} aria-hidden /> Send {selected.length || ''} connection request{selected.length === 1 ? '' : 's'}</>}
+              </Button>
+              {picked.size > 0 && !send.active && (
+                <Button variant="ghost" onClick={() => setPicked(new Set())}>Clear selection</Button>
+              )}
+              {!sender && (
+                <span className="text-xs text-warning-text">Add a sender account in Settings first.</span>
+              )}
+            </div>
+
+            <p className="text-xs text-fg-muted">
+              Keep batches small. LinkedIn allows roughly 100–200 invites a week and restricts accounts that burst;
+              this app caps you at {maxBatch} per send and {sender?.dailyCap || 20} per day.
+            </p>
+          </div>
+        </Card>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -2242,6 +2464,235 @@ function Searches({ history, loading, onOpen, onClear, onDelete }) {
   );
 }
 
+/* ═══════════════════════ sign in / sign up ═══════════════════════ */
+/* Login se pehle app ka koi data load hi nahi hota — /api/auth/me 401 deta
+   hai to seedha yahi screen aati hai. Har banda apna account banata hai aur
+   apni API keys deta hai; ek user ka data dusre ko kabhi nahi dikhta. */
+
+function AuthScreen({ onDone, dbOffline }) {
+  const [mode, setMode] = useState('login');
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const signup = mode === 'signup';
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      const path = signup ? '/api/auth/signup' : '/api/auth/login';
+      const body = signup ? { email, password, name } : { email, password };
+      const out = await api.post(path, body);
+      onDone(out.user);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field = `h-10 w-full rounded-md border border-line bg-input px-3 text-sm text-fg shadow-sm ${ring}`;
+
+  return (
+    <div className="themed flex min-h-screen items-center justify-center bg-app px-4 py-10">
+      <div className="w-full max-w-[420px]">
+        <div className="mb-6 flex items-center gap-3">
+          <RaynMark size={40} />
+          <div>
+            <p className="accent-text text-h1 font-bold tracking-tight">RAYN.AI</p>
+            <p className="text-sm text-fg-muted">Autonomous Talent Intelligence</p>
+          </div>
+        </div>
+
+        <Card className="p-6">
+          <h1 className="text-h1 font-semibold text-fg">
+            {signup ? 'Create your account' : 'Welcome back'}
+          </h1>
+          <p className="mt-1 text-sm text-fg-sec">
+            {signup
+              ? 'Your searches, drafts and contacts stay private to your account.'
+              : 'Sign in to get back to your pipeline.'}
+          </p>
+
+          {dbOffline && (
+            <InlineStatus type="error">
+              The database is not connected, so accounts are unavailable. Check DATABASE_URL on the server.
+            </InlineStatus>
+          )}
+
+          <form onSubmit={submit} className="mt-5 space-y-4">
+            {signup && (
+              <div>
+                <FieldLabel htmlFor="auth-name" aside={<span className="text-xs text-fg-muted">Optional</span>}>
+                  Name
+                </FieldLabel>
+                <input id="auth-name" value={name} onChange={(e) => setName(e.target.value)}
+                       autoComplete="name" placeholder="Anshu Kumar" className={field} />
+              </div>
+            )}
+
+            <div>
+              <FieldLabel htmlFor="auth-email">Email</FieldLabel>
+              <input id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                     autoComplete="email" required placeholder="you@example.com" className={field} />
+            </div>
+
+            <div>
+              <FieldLabel htmlFor="auth-password"
+                          aside={signup ? <span className="text-xs text-fg-muted">At least 8 characters</span> : null}>
+                Password
+              </FieldLabel>
+              <input id="auth-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                     autoComplete={signup ? 'new-password' : 'current-password'} required
+                     placeholder="••••••••" className={field} />
+            </div>
+
+            {error && <InlineStatus type="error">{error}</InlineStatus>}
+
+            <Button type="submit" variant="primary" size="lg" className="w-full"
+                    disabled={busy || dbOffline}>
+              {busy
+                ? <><Loader2 size={14} aria-hidden className="animate-spin" /> {signup ? 'Creating account…' : 'Signing in…'}</>
+                : <>{signup ? 'Create account' : 'Sign in'} <ArrowRight size={14} aria-hidden /></>}
+            </Button>
+          </form>
+
+          <p className="mt-5 text-center text-sm text-fg-muted">
+            {signup ? 'Already have an account?' : "Don't have an account?"}{' '}
+            <button type="button"
+                    onClick={() => { setMode(signup ? 'login' : 'signup'); setError(''); }}
+                    className={`font-semibold text-brand-text hover:underline ${ring}`}>
+              {signup ? 'Sign in' : 'Create one'}
+            </button>
+          </p>
+        </Card>
+
+        <p className="mt-4 text-center text-xs text-fg-muted">
+          After signing up, add your own Apify and OpenRouter keys in Settings — every account runs on its own keys.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════ API keys (per account) ═══════════════════════ */
+
+function ApiKeysCard({ user, secretReady, busy, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [apify, setApify] = useState('');
+  const [openRouter, setOpenRouter] = useState('');
+
+  const save = async () => {
+    // Khaali chhoda to us key ko haath nahi lagate (null bhejte hain).
+    const ok = await onSave({
+      apify: apify.trim() || null,
+      openRouter: openRouter.trim() || null,
+    });
+    if (ok) { setApify(''); setOpenRouter(''); setOpen(false); }
+  };
+
+  const ready = user?.hasApifyKey && user?.hasOpenRouterKey;
+  const field = `h-9 w-full rounded-md border border-line bg-input px-3 font-mono text-sm text-fg shadow-sm ${ring}`;
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-col gap-3 border-b border-line-subtle px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <span aria-hidden className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-surface-sunken text-fg-muted">
+            <KeyRound size={15} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-h3 font-semibold text-fg">Your API keys</p>
+            <p className="mt-0.5 text-sm text-fg-muted">
+              This account runs on your own keys — nothing is shared with other accounts.
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 sm:pl-4">
+          <OkBadge ok={!!ready} yes="Ready" no="Incomplete" />
+          <Button size="sm" onClick={() => setOpen((o) => !o)}>
+            {user?.hasApifyKey || user?.hasOpenRouterKey
+              ? <><RefreshCw size={12} aria-hidden /> Update</>
+              : <><Plus size={12} aria-hidden /> Add keys</>}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-px border-b border-line-subtle bg-line-subtle sm:grid-cols-2">
+        <div className="bg-surface px-5 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Apify</p>
+          <p className="mt-1 text-sm text-fg-sec">
+            {user?.hasApifyKey ? 'Saved — used for scraping and people search' : 'Not set — searches will not run'}
+          </p>
+        </div>
+        <div className="bg-surface px-5 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">OpenRouter</p>
+          <p className="mt-1 text-sm text-fg-sec">
+            {user?.hasOpenRouterKey ? 'Saved — used for scoring and drafts' : 'Not set — scoring and drafts will not run'}
+          </p>
+        </div>
+      </div>
+
+      {open && (
+        <div className="space-y-4 border-b border-line-subtle bg-surface-sunken px-5 py-4">
+          {!secretReady && (
+            <InlineStatus type="error">
+              APP_SECRET_KEY is not set on the server, so keys cannot be encrypted — and they will not be stored
+              in plain text. Ask the admin to set it before saving.
+            </InlineStatus>
+          )}
+
+          <div>
+            <FieldLabel htmlFor="key-apify"
+                        aside={user?.hasApifyKey ? <span className="text-xs text-fg-muted">Saved — leave blank to keep it</span> : null}>
+              Apify API key
+            </FieldLabel>
+            <input id="key-apify" type="password" value={apify} onChange={(e) => setApify(e.target.value)}
+                   autoComplete="off" spellCheck={false}
+                   placeholder={user?.hasApifyKey ? '•••••••• (saved)' : 'apify_api_…'} className={field} />
+            <p className="mt-1.5 text-xs text-fg-muted">
+              From console.apify.com → Settings → Integrations. Encrypted before storage, never sent back to this page.
+            </p>
+          </div>
+
+          <div>
+            <FieldLabel htmlFor="key-openrouter"
+                        aside={user?.hasOpenRouterKey ? <span className="text-xs text-fg-muted">Saved — leave blank to keep it</span> : null}>
+              OpenRouter API key
+            </FieldLabel>
+            <input id="key-openrouter" type="password" value={openRouter} onChange={(e) => setOpenRouter(e.target.value)}
+                   autoComplete="off" spellCheck={false}
+                   placeholder={user?.hasOpenRouterKey ? '•••••••• (saved)' : 'sk-or-v1-…'} className={field} />
+            <p className="mt-1.5 text-xs text-fg-muted">From openrouter.ai → Keys.</p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="primary" onClick={save} disabled={busy || !secretReady}>
+              {busy
+                ? <><Loader2 size={13} aria-hidden className="animate-spin" /> Saving…</>
+                : <><Check size={13} aria-hidden /> Save keys</>}
+            </Button>
+            <Button variant="ghost" onClick={() => { setOpen(false); setApify(''); setOpenRouter(''); }}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="px-5 py-3">
+        <p className="text-xs text-fg-muted">
+          Signed in as <b className="font-semibold text-fg-sec">{user?.email}</b>. Everything you run bills to your
+          own Apify and OpenRouter accounts.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
 /* ═══════════════════════ app ═══════════════════════ */
 
 /* ═══════════════════════ analytics ═══════════════════════ */
@@ -2363,24 +2814,219 @@ function OkBadge({ ok, yes, no }) {
   );
 }
 
-function SettingsView({ health, theme, setTheme, creditsLeft, onClearHistory }) {
+/* ═══════════════════════ sender account ═══════════════════════ */
+/* Yahin se user apna LinkedIn account jodta hai. Cookie server par Fernet se
+   encrypt ho kar jaati hai aur wapas kabhi nahi aati — isliye field hamesha
+   khaali dikhta hai aur "saved" ka pata sirf badge se chalta hai. */
+
+const SENDER_STATUS = {
+  ready:      { type: 'success', word: 'Ready',        Icon: CheckCircle2 },
+  unverified: { type: 'warning', word: 'Not verified', Icon: AlertTriangle },
+  expired:    { type: 'error',   word: 'Cookie expired', Icon: XCircle },
+  unknown:    { type: 'info',    word: 'Unclear',      Icon: Info },
+};
+
+function SenderStatusBadge({ status }) {
+  const look = SENDER_STATUS[status] || SENDER_STATUS.unknown;
+  const cls = {
+    success: 'border-success-border bg-success-subtle text-success-text',
+    warning: 'border-warning-border bg-warning-subtle text-warning-text',
+    error: 'border-error-border bg-error-subtle text-error-text',
+    info: 'border-info-border bg-info-subtle text-info-text',
+  }[look.type];
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${cls}`}>
+      <look.Icon size={12} aria-hidden /> {look.word}
+    </span>
+  );
+}
+
+function SenderAccountCard({ senders, secretReady, busy, onSave, onVerify, onDelete }) {
+  const current = senders[0] || null;
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState('');
+  const [liAt, setLiAt] = useState('');
+  const [jsession, setJsession] = useState('');
+  const [premium, setPremium] = useState(false);
+
+  useEffect(() => {
+    setLabel(current?.label || 'My LinkedIn');
+    setPremium(!!current?.isPremium);
+  }, [current?.id, current?.label, current?.isPremium]);
+
+  const save = async () => {
+    const ok = await onSave({
+      id: current?.id || null,
+      label: label.trim() || 'My LinkedIn',
+      liAt: liAt.trim() || null,
+      jsessionid: jsession.trim() || null,
+      isPremium: premium,
+    });
+    if (ok) { setLiAt(''); setJsession(''); setOpen(false); }
+  };
+
+  const dailyLeft = current ? Math.max(0, (current.dailyCap || 0) - (current.sentToday || 0)) : 0;
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-col gap-3 border-b border-line-subtle px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <span aria-hidden className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-surface-sunken text-fg-muted">
+            <UserPlus size={15} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-h3 font-semibold text-fg">LinkedIn sender account</p>
+            <p className="mt-0.5 text-sm text-fg-muted">
+              {current
+                ? `Connection requests go out from ${current.label}.`
+                : 'Add the account that connection requests should be sent from.'}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 sm:pl-4">
+          {current && <SenderStatusBadge status={current.status} />}
+          <Button size="sm" onClick={() => setOpen((o) => !o)}>
+            {current ? <><RefreshCw size={12} aria-hidden /> Update</> : <><Plus size={12} aria-hidden /> Add account</>}
+          </Button>
+        </div>
+      </div>
+
+      {/* Saved account ki halat — quota aur note limit dono yahin dikhte hain,
+          kyunki free account par note hi sabse pehle khatam hota hai. */}
+      {current && (
+        <div className="grid gap-px border-b border-line-subtle bg-line-subtle sm:grid-cols-3">
+          <div className="bg-surface px-5 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Sent today</p>
+            <p className="mt-0.5 text-h3 font-semibold tabular-nums text-fg">
+              {current.sentToday} <span className="text-sm font-normal text-fg-muted">of {current.dailyCap}</span>
+            </p>
+          </div>
+          <div className="bg-surface px-5 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">This week</p>
+            <p className="mt-0.5 text-h3 font-semibold tabular-nums text-fg">
+              {current.sentThisWeek} <span className="text-sm font-normal text-fg-muted">of {current.weeklyCap}</span>
+            </p>
+          </div>
+          <div className="bg-surface px-5 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Note limit</p>
+            <p className="mt-0.5 text-h3 font-semibold tabular-nums text-fg">
+              {current.noteLimit} <span className="text-sm font-normal text-fg-muted">chars</span>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {current?.statusDetail && (
+        <div className="border-b border-line-subtle px-5 py-3">
+          <p className="text-sm text-fg-muted">{current.statusDetail}</p>
+        </div>
+      )}
+
+      {/* Free account ki asli deewar: note ~5/month par khatam. Isko chhupana
+          matlab user ka batch chup-chaap bina note ke chala jayega. */}
+      {current && !current.isPremium && (
+        <div className="border-b border-line-subtle px-5 py-3">
+          <InlineStatus type="warning">
+            On a free LinkedIn account only about 5 invites a month can carry a note, and notes cut off at 200
+            characters. The rest go out as plain requests. Turn on Premium below if this account has it.
+          </InlineStatus>
+        </div>
+      )}
+
+      {open && (
+        <div className="space-y-4 border-b border-line-subtle bg-surface-sunken px-5 py-4">
+          {!secretReady && (
+            <InlineStatus type="error">
+              APP_SECRET_KEY is not set on the server, so the cookie cannot be encrypted — and it will not be
+              stored in plain text. Add it to .env and restart before saving.
+            </InlineStatus>
+          )}
+
+          <div>
+            <FieldLabel htmlFor="sender-label">Account name</FieldLabel>
+            <input id="sender-label" value={label} onChange={(e) => setLabel(e.target.value)}
+                   placeholder="My LinkedIn"
+                   className={`h-9 w-full rounded-md border border-line bg-input px-3 text-sm text-fg shadow-sm ${ring}`} />
+          </div>
+
+          <div>
+            <FieldLabel htmlFor="sender-cookie"
+                        aside={current?.hasCookie ? <span className="text-xs text-fg-muted">A cookie is already saved — leave blank to keep it</span> : null}>
+              li_at cookie
+            </FieldLabel>
+            <input id="sender-cookie" type="password" value={liAt} onChange={(e) => setLiAt(e.target.value)}
+                   autoComplete="off" spellCheck={false}
+                   placeholder={current?.hasCookie ? '•••••••• (saved)' : 'AQEDAT…'}
+                   className={`h-9 w-full rounded-md border border-line bg-input px-3 font-mono text-sm text-fg shadow-sm ${ring}`} />
+            <p className="mt-1.5 text-xs text-fg-muted">
+              Log in to LinkedIn in your browser, open DevTools → Application → Cookies → linkedin.com, and copy
+              the value of <b className="font-semibold text-fg-sec">li_at</b>. It is encrypted before it is stored
+              and is never sent back to this page.
+            </p>
+          </div>
+
+          <div>
+            <FieldLabel htmlFor="sender-jsession" aside={<span className="text-xs text-fg-muted">Optional</span>}>
+              JSESSIONID
+            </FieldLabel>
+            <input id="sender-jsession" type="password" value={jsession} onChange={(e) => setJsession(e.target.value)}
+                   autoComplete="off" spellCheck={false} placeholder="ajax:…"
+                   className={`h-9 w-full rounded-md border border-line bg-input px-3 font-mono text-sm text-fg shadow-sm ${ring}`} />
+          </div>
+
+          <SwitchRow id="sender-premium" title="This account has LinkedIn Premium"
+                     subtitle="Premium removes the monthly cap on invite notes and allows 300 characters instead of 200."
+                     on={premium} onChange={setPremium} />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="primary" onClick={save} disabled={busy || (!secretReady && !!liAt.trim())}>
+              {busy ? <><Loader2 size={13} aria-hidden className="animate-spin" /> Saving…</> : <><Check size={13} aria-hidden /> Save account</>}
+            </Button>
+            <Button variant="ghost" onClick={() => { setOpen(false); setLiAt(''); setJsession(''); }}>Cancel</Button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 px-5 py-4">
+        {current ? (
+          <>
+            <Button size="sm" onClick={() => onVerify(current.id)} disabled={busy}>
+              <ShieldCheck size={13} aria-hidden /> Check cookie
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => onDelete(current.id)} disabled={busy}>
+              <Trash2 size={13} aria-hidden /> Remove
+            </Button>
+            <span className="ml-auto text-xs tabular-nums text-fg-muted">
+              {dailyLeft} invite{dailyLeft === 1 ? '' : 's'} left today
+            </span>
+          </>
+        ) : (
+          <p className="text-sm text-fg-muted">
+            No sender account yet. Connection requests stay disabled until one is added.
+          </p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function SettingsView({ health, theme, setTheme, creditsLeft, onClearHistory,
+                       senders = [], secretReady, senderBusy, onSaveSender, onVerifySender, onDeleteSender,
+                       me, keysBusy, onSaveKeys, onLogout }) {
   const db = health?.db || {};
   return (
     <div className="space-y-6">
+      <ApiKeysCard user={me} secretReady={secretReady} busy={keysBusy} onSave={onSaveKeys} />
+
+      <SenderAccountCard senders={senders} secretReady={secretReady} busy={senderBusy}
+                         onSave={onSaveSender} onVerify={onVerifySender} onDelete={onDeleteSender} />
+
       <Card className="overflow-hidden">
         <SettingRow Icon={Zap} label="Scoring model" hint="Set on the server with OPENROUTER_MODEL.">
           <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface-sunken px-3 py-1.5 text-sm font-medium text-fg-sec">
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-success" />
             {health?.model || '—'}
           </span>
-        </SettingRow>
-
-        <SettingRow Icon={KeyRound} label="Apify sourcing key" hint="APIFY_API_KEY — required to source profiles.">
-          <OkBadge ok={!!health?.apifyKey} yes="Connected" no="Missing" />
-        </SettingRow>
-
-        <SettingRow Icon={KeyRound} label="OpenRouter key" hint="OPENROUTER_API_KEY — required for scoring and drafts.">
-          <OkBadge ok={!!health?.openRouterKey} yes="Connected" no="Missing" />
         </SettingRow>
 
         <SettingRow Icon={Database} label="Database"
@@ -2400,6 +3046,10 @@ function SettingsView({ health, theme, setTheme, creditsLeft, onClearHistory }) 
 
         <SettingRow Icon={Trash2} label="Clear run history" hint="Deletes every past run and its results. Saved matches stay.">
           <Button variant="danger" onClick={onClearHistory}><Trash2 size={14} aria-hidden /> Clear history</Button>
+        </SettingRow>
+
+        <SettingRow Icon={KeyRound} label="Sign out" hint={`Signed in as ${me?.email || 'this account'}.`}>
+          <Button onClick={onLogout}><ArrowRight size={14} aria-hidden /> Sign out</Button>
         </SettingRow>
       </Card>
     </div>
@@ -2441,6 +3091,10 @@ function App() {
   const [attached, setAttached] = useState(null);
   const [uploading, setUploading] = useState(false);
 
+  /* login se pehle app ka koi data load nahi hota — me === null matlab
+     AuthScreen, undefined matlab abhi pata hi nahi (boot chal raha hai). */
+  const [me, setMe] = useState(undefined);
+  const [keysBusy, setKeysBusy] = useState(false);
   const [health, setHealth] = useState(null);
   const [model, setModel] = useState('deepseek/deepseek-v4-pro');
   const [toasts, setToasts] = useState([]);
@@ -2459,6 +3113,13 @@ function App() {
 
   /* reach out — jobKey se keyed drafts, aur abhi khula hua modal */
   const [drafts, setDrafts] = useState({});
+  /* decision makers: sender accounts, mile hue log, aur chalta hua batch */
+  const [senders, setSenders] = useState([]);
+  const [secretReady, setSecretReady] = useState(false);
+  const [senderBusy, setSenderBusy] = useState(false);
+  const [contacts, setContacts] = useState([]);
+  const [discovering, setDiscovering] = useState(null);
+  const [send, setSend] = useState({ active: false, total: 0, done: 0, live: {}, message: '', error: '' });
   const [outreachJob, setOutreachJob] = useState(null);
   const [outreachLoading, setOutreachLoading] = useState(false);
   const [outreachError, setOutreachError] = useState('');
@@ -2505,6 +3166,30 @@ function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  /* ── decision makers + connection requests ──
+     senders/contacts dono server par rehte hain; yahan sirf unka cache hai.
+     `send` ek hi object me poora batch ka live haal rakhta hai taaki har row
+     apna status khud padh sake. */
+
+  const refreshSenders = useCallback(async () => {
+    try {
+      const out = await api.get('/api/senders');
+      setSenders(out.senders || []);
+      setSecretReady(!!out.secretReady);
+    } catch {
+      /* DB off — Settings me card khaali dikhega, alag toast ki zaroorat nahi */
+    }
+  }, []);
+
+  const refreshContacts = useCallback(async () => {
+    try {
+      const out = await api.get('/api/contacts?limit=200');
+      setContacts(out.contacts || []);
+    } catch {
+      /* same — chup rehna theek hai */
+    }
+  }, []);
+
   /* Server se history + shortlist + stats dobara le aata hai. */
   const refresh = useCallback(async () => {
     try {
@@ -2516,30 +3201,44 @@ function App() {
       setHistory(h.searches || []);
       setSaved(s.saved || []);
       setStats(st);
+      // Sender account aur mile hue log — inke bina Outreach tab adhoora hai.
+      refreshSenders();
+      refreshContacts();
     } catch {
       /* DB down — health check pehle hi bata dega, dobara toast nahi karte */
     } finally {
       setHistoryLoading(false);
     }
-  }, []);
+  }, [refreshSenders, refreshContacts]);
 
   useEffect(() => {
-    fetch('/api/health').then((r) => r.json()).then(async (h) => {
-      setHealth(h);
-      setModel(h.model);
-      const missing = [];
-      if (!h.apifyKey) missing.push('APIFY_API_KEY');
-      if (!h.openRouterKey) missing.push('OPENROUTER_API_KEY');
-      if (missing.length) toast('error', 'Missing API keys', `${missing.join(' and ')} not found in .env — searches will fail.`);
+    (async () => {
+      const h = await fetch('/api/health').then((r) => r.json()).catch(() => null);
+      if (h) { setHealth(h); setModel(h.model); setSecretReady(!!h.secretReady); }
 
-      const db = h.db || {};
+      const db = h?.db || {};
       setDbOk(!!db.connected);
       if (!db.connected) {
+        setMe(null);
         setHistoryLoading(false);
         toast('warning', 'Database not connected',
-          db.configured ? `${db.error || 'Connection failed'} — history and saved matches will not be stored.`
-                        : 'DATABASE_URL is not set in .env — history and saved matches will not be stored.');
+          db.configured ? `${db.error || 'Connection failed'} — accounts and history are unavailable.`
+                        : 'DATABASE_URL is not set on the server — accounts are unavailable.');
         return;
+      }
+
+      // Kaun logged in hai? null aaya to AuthScreen dikhti hai aur aage ka
+      // koi data fetch hota hi nahi — warna har call 401 deti.
+      const who = await api.get('/api/auth/me').catch(() => ({ user: null }));
+      setMe(who.user || null);
+      if (!who.user) { setHistoryLoading(false); return; }
+
+      if (!who.user.hasApifyKey || !who.user.hasOpenRouterKey) {
+        const missing = [];
+        if (!who.user.hasApifyKey) missing.push('Apify');
+        if (!who.user.hasOpenRouterKey) missing.push('OpenRouter');
+        toast('warning', 'API keys needed',
+          `Add your ${missing.join(' and ')} key in Settings — this account runs on its own keys.`);
       }
 
       // Purana browser-only data ek hi baar DB me chala jaata hai. Flag tabhi
@@ -2563,8 +3262,44 @@ function App() {
       }
 
       refresh();
-    }).catch(() => setHistoryLoading(false));
+    })().catch(() => { setMe(null); setHistoryLoading(false); });
   }, [toast, refresh]);
+
+  /* ── auth actions ── */
+
+  const onAuthed = useCallback((user) => {
+    setMe(user);
+    setHistoryLoading(true);
+    refresh();
+    if (!user.hasApifyKey || !user.hasOpenRouterKey) {
+      toast('info', 'Add your API keys', 'Settings → Your API keys. Nothing runs until they are set.');
+    }
+  }, [refresh, toast]);
+
+  const logout = useCallback(async () => {
+    try { await api.post('/api/auth/logout', {}); } catch { /* cookie waise bhi gir jaayegi */ }
+    // Poora local state saaf — warna agla banda pichhle ka data dekh leta.
+    setMe(null);
+    setJobs([]); setDrafts({}); setContacts([]); setSenders([]);
+    setHistory([]); setSaved([]); setSearchId(null); setParams(null);
+    setStats({ searches: 0, roles: 0, spend: 0, avgScore: null, saved: 0 });
+    setView('new');
+  }, []);
+
+  const saveKeys = useCallback(async (payload) => {
+    setKeysBusy(true);
+    try {
+      const out = await api.post('/api/auth/keys', payload);
+      setMe(out.user);
+      toast('success', 'API keys saved', 'Searches and drafts will use your own keys from now on.');
+      return true;
+    } catch (e) {
+      toast('error', 'Could not save the keys', e.message);
+      return false;
+    } finally {
+      setKeysBusy(false);
+    }
+  }, [toast]);
 
   const uploadFile = useCallback(async (file) => {
     setUploading(true);
@@ -2797,6 +3532,152 @@ function App() {
     setOutreachError('');
   }, []);
 
+  const saveSender = useCallback(async (payload) => {
+    setSenderBusy(true);
+    try {
+      const out = await api.post('/api/senders', payload);
+      await refreshSenders();
+      toast('success', 'Sender account saved', `${out.sender.label} — check the cookie before sending.`);
+      // Cookie nayi hai to turant verify kar dete hain: user ko baad me
+      // "failed" dekhne se behtar hai abhi pata chal jaye.
+      if (payload.liAt) {
+        const v = await api.post(`/api/senders/${out.sender.id}/verify`);
+        await refreshSenders();
+        if (v.status !== 'ready') toast('warning', 'Cookie not confirmed', v.detail);
+      }
+      return true;
+    } catch (e) {
+      toast('error', 'Could not save the account', e.message);
+      return false;
+    } finally {
+      setSenderBusy(false);
+    }
+  }, [refreshSenders, toast]);
+
+  const verifySender = useCallback(async (id) => {
+    setSenderBusy(true);
+    try {
+      const v = await api.post(`/api/senders/${id}/verify`);
+      await refreshSenders();
+      if (v.status === 'ready') toast('success', 'Cookie works', v.detail);
+      else if (v.status === 'expired') toast('error', 'Cookie expired', v.detail);
+      else toast('warning', 'Could not confirm the cookie', v.detail);
+    } catch (e) {
+      toast('error', 'Check failed', e.message);
+    } finally {
+      setSenderBusy(false);
+    }
+  }, [refreshSenders, toast]);
+
+  const deleteSender = useCallback(async (id) => {
+    setSenderBusy(true);
+    try {
+      await api.del(`/api/senders/${id}`);
+      await refreshSenders();
+      toast('info', 'Sender account removed', 'The stored cookie was deleted.');
+    } catch (e) {
+      toast('error', 'Could not remove the account', e.message);
+    } finally {
+      setSenderBusy(false);
+    }
+  }, [refreshSenders, toast]);
+
+  /* Ek company ke decision makers dhoondhna. Cookie ki zaroorat nahi —
+     ye public profile data hai, Apify actor bina login ke chalta hai. */
+  const discoverContacts = useCallback(async (draft) => {
+    setDiscovering(draft.jobKey);
+    try {
+      const out = await api.post('/api/contacts/discover', {
+        job: { company: draft.company, title: draft.jobTitle, url: draft.jobKey },
+        target: draft.target,
+        employees: draft.employees,
+        searchId,
+        limit: 10,
+      });
+      await refreshContacts();
+      if (out.contacts.length) {
+        toast('success', `${out.contacts.length} found at ${out.company}`,
+          out.target === 'founder' ? 'Founder / CTO level profiles' : 'Recruiting and HR profiles');
+      } else {
+        toast('warning', 'Nobody came back', out.message || `No public profiles matched at ${draft.company}.`);
+      }
+    } catch (e) {
+      toast('error', 'Could not find people', e.message);
+    } finally {
+      setDiscovering(null);
+    }
+  }, [searchId, refreshContacts, toast]);
+
+  /* Bulk invite. Stream isliye padhte hain ki har request ke beech ~25s ka
+     gap hai — bina live update ke UI mara hua lagta. */
+  const sendInvites = useCallback(async (contactIds, note) => {
+    if (!contactIds.length) return;
+
+    setSend({ active: true, total: contactIds.length, done: 0, live: {}, message: '', error: '' });
+
+    const notes = {};
+    for (const id of contactIds) notes[String(id)] = note;
+
+    try {
+      const res = await fetch('/api/connect/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactIds, notes }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const ev = JSON.parse(line);
+
+          if (ev.type === 'sending') {
+            setSend((s) => ({ ...s, message: `Inviting ${ev.name}…`, live: { ...s.live, [ev.contactId]: { status: 'sending' } } }));
+          } else if (ev.type === 'waiting') {
+            setSend((s) => ({ ...s, message: `Pausing ${ev.seconds}s before the next invite…`,
+                              live: { ...s.live, [ev.contactId]: { status: 'waiting' } } }));
+          } else if (ev.type === 'result') {
+            setSend((s) => ({
+              ...s,
+              done: s.done + 1,
+              live: { ...s.live, [ev.contactId]: { status: ev.status, error: ev.error } },
+            }));
+            if (ev.status === 'failed') toast('warning', `Invite to ${ev.name} failed`, ev.error);
+          } else if (ev.type === 'skipped') {
+            toast('info', `Skipped ${ev.name}`, ev.reason);
+          } else if (ev.type === 'done') {
+            if (ev.sent) toast('success', `${ev.sent} connection request${ev.sent === 1 ? '' : 's'} sent`,
+                                ev.failed ? `${ev.failed} could not be sent.` : 'They are pending on LinkedIn now.');
+            else if (!ev.failed) toast('info', 'Nothing was sent', 'Everyone selected had already been invited.');
+          } else if (ev.type === 'error') {
+            throw new Error(ev.message);
+          }
+        }
+      }
+
+      await Promise.all([refreshContacts(), refreshSenders()]);
+      setSend((s) => ({ ...s, active: false, message: '' }));
+    } catch (e) {
+      toast('error', 'Sending stopped', e.message);
+      setSend((s) => ({ ...s, active: false, message: '', error: e.message }));
+      await Promise.all([refreshContacts(), refreshSenders()]);
+    }
+  }, [refreshContacts, refreshSenders, toast]);
+
   /* Purani run kholna = DB se poora record wapas laana: jobs, JD, params aur
      agar plan bana tha to wo bhi. */
   const openHistory = async (h) => {
@@ -2850,7 +3731,26 @@ function App() {
   const [pageTitle, pageSub] = titles[view];
   const navItem = NAV.find((n) => n.id === view);
 
-  const sidebarProps = { view, setView, savedCount: saved.length, contactCount: Object.keys(drafts).length, spend };
+  /* 401 kahin se bhi aaye to login screen — session chup-chaap expire ho
+     sakta hai aur user ko khaali table dikhta rehta. */
+  useEffect(() => {
+    const onOut = () => setMe(null);
+    window.addEventListener('ha:signed-out', onOut);
+    return () => window.removeEventListener('ha:signed-out', onOut);
+  }, []);
+
+  /* undefined = abhi pata nahi (boot), null = logged out. */
+  if (me === undefined) {
+    return (
+      <div className="themed grid min-h-screen place-items-center bg-app">
+        <Loader2 size={22} aria-hidden className="animate-spin text-brand-text" />
+      </div>
+    );
+  }
+  if (me === null) return <AuthScreen onDone={onAuthed} dbOffline={!dbOk} />;
+
+  const sidebarProps = { view, setView, savedCount: saved.length,
+    contactCount: contacts.length || Object.keys(drafts).length, spend, me, onLogout: logout };
 
   return (
     <div className="relative z-10 flex h-full overflow-hidden">
@@ -2931,11 +3831,20 @@ function App() {
                         savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)}
                         drafts={drafts} onReachOut={openOutreach} />
             )}
-            {view === 'contacts' && <Contacts drafts={drafts} jobs={jobs} onOpen={openOutreach} />}
+            {view === 'contacts' && (
+              <Contacts drafts={drafts} jobs={jobs} contacts={contacts} sender={senders[0] || null}
+                        discovering={discovering} send={send} maxBatch={MAX_BATCH_INVITES}
+                        onOpen={openOutreach} onDiscover={discoverContacts} onSend={sendInvites}
+                        go={setView} />
+            )}
             {view === 'analytics' && <Analytics stats={stats} history={history} jobs={jobs} saved={saved} spend={spend} />}
             {view === 'settings' && (
               <SettingsView health={health} theme={theme} setTheme={setTheme}
-                            creditsLeft={creditsLeft} onClearHistory={clearHistory} />
+                            creditsLeft={creditsLeft} onClearHistory={clearHistory}
+                            senders={senders} secretReady={secretReady} senderBusy={senderBusy}
+                            onSaveSender={saveSender} onVerifySender={verifySender}
+                            onDeleteSender={deleteSender}
+                            me={me} keysBusy={keysBusy} onSaveKeys={saveKeys} onLogout={logout} />
             )}
 
             {view === 'saved' && (

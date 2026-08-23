@@ -13,7 +13,7 @@ FOUNDER = "founder"
 HR = "hr"
 
 # Founder route par in titles me se koi bhi kaam karega.
-FOUNDER_TITLES = "Founder OR CEO OR Co-founder"
+FOUNDER_TITLES = "Founder OR Co-founder OR CTO OR CEO"
 HR_TITLES = "Recruiter OR Talent OR HR"
 
 
@@ -60,14 +60,14 @@ def finalize(draft: dict, job: dict) -> dict:
     # tone ka mismatch alag se warning me bata dete hain.
     target_role = draft.get("targetRole") or ""
     if adjusted or not target_role:
-        target_role = "Founder / CEO" if target == FOUNDER else "Talent / HR"
+        target_role = "Founder / CTO" if target == FOUNDER else "Talent / HR"
 
     return {
         **draft,
         "company": job.get("company"),
         "jobTitle": job.get("title"),
         "target": target,
-        "targetLabel": "Founder / CEO" if target == FOUNDER else "HR / Recruiter",
+        "targetLabel": "Founder / CTO" if target == FOUNDER else "HR / Recruiter",
         "targetRole": target_role,
         "targetReason": reason,
         "threshold": config.FOUNDER_MAX_EMPLOYEES,

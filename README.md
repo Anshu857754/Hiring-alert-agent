@@ -28,18 +28,29 @@ Table — best match sabse upar
 
 ## Setup
 
-`.env` file me do keys aur database URL chahiye:
+`.env` me sirf do cheezein zaroori hain — **API keys ab yahan nahi aati**, wo
+har user Settings me khud daalta hai (dekho *Accounts* section):
 
 ```
-APIFY_API_KEY=apify_api_xxxxxxxxxxxx
-OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxx
 DATABASE_URL=postgresql://user:pass@host.neon.tech/neondb?sslmode=require
-APP_PASSWORD=          # khaali = app khuli. Public deploy par zaroor bharo
-FOUNDER_MAX_EMPLOYEES=150   # optional — isse chhoti company me founder, badi me HR
+APP_SECRET_KEY=        # users ki keys + LinkedIn cookie isse encrypt hoti hain
+
+COOKIE_SECURE=0             # https deploy par 1 kar do
+FOUNDER_MAX_EMPLOYEES=50    # optional — isse chhoti company me founder/CTO, badi me HR
+CONNECT_PROVIDER=apify      # optional — apify ya unipile
 ```
 
-`DATABASE_URL` na ho to app phir bhi chalti hai — bas history, shortlist aur
-plans save nahi honge (header me "DB offline" chip dikh jaayegi).
+`APP_SECRET_KEY` koi bhi lambi random string ho sakti hai:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Badal di to purani sealed keys/cookies bekaar ho jaayengi — UI unhe dobara
+maangega, crash nahi hoga.
+
+`DATABASE_URL` ke bina ab app kaam nahi karegi: accounts hi database me rehte
+hain, aur bina account ke koi screen nahi khulti. (Pehle DB optional thi.)
 
 Install aur run (Python 3.10+):
 
@@ -69,6 +80,64 @@ uvicorn app.main:app --reload --port 10000
 
 ---
 
+## Accounts (multi-user)
+
+Pehle ye app single-user thi: ek `.env`, ek banda, aur ek HTTP Basic password
+gate. Ab har banda apna account banata hai, apni API keys deta hai, aur sirf
+apna data dekhta hai.
+
+**Signup / login**
+
+- Bina login ke sirf login screen dikhti hai. `GET /api/auth/me` `null` de to
+  frontend wahin ruk jaata hai — koi data fetch hota hi nahi
+- Password `hashlib.scrypt` se hash hota hai (stdlib, memory-hard). Har user ka
+  apna salt; compare `hmac.compare_digest` se — galat password ka jawab hamesha
+  ek jitna time leta hai
+- Session server-side hai (`sessions` table) + httpOnly cookie. Logout row
+  delete karta hai, matlab token sach me mar jaata hai. Signed cookie hoti to
+  logout sirf browser se cookie hataata
+- Email na mile tab bhi ek dummy hash chalta hai — warna response time se pata
+  chal jaata ki ye email registered hai ya nahi
+
+**Har user apni keys laata hai**
+
+Settings → **Your API keys** me Apify aur OpenRouter keys daalo. Ye Fernet se
+sealed hoti hain (`APP_SECRET_KEY`) aur browser ko kabhi wapas nahi jaati —
+UI sirf "set hai / nahi hai" dekhta hai.
+
+Server ki `.env` wali keys ab kisi user ko nahi milti. Wajah seedhi hai: agar
+milti, to pehla ajnabi jo signup karta wo tumhare Apify credits jalata. Isliye
+keys ke bina search/draft/discover sab saaf error deta hai, chalta nahi.
+
+**Data isolation**
+
+Har table par `user_id` hai aur har query uske andar bandhi hai. Sirf list
+queries nahi — ID se bhi kuch nahi milta:
+
+| Bob ne try kiya | Nateeja |
+|---|---|
+| `GET /api/searches/{alice_ki_id}` | 404 |
+| `DELETE /api/searches/{alice_ki_id}` | 404 |
+| `POST /api/senders/{alice_ki_id}/verify` | 404 |
+| `DELETE /api/contacts/{alice_ki_id}` | `deleted: 0` |
+| `POST /api/connect/send` Alice ke contacts par | `sent: 0` — Apify call hui hi nahi |
+
+Unique constraints bhi per-user hain (`(user_id, job_key)`,
+`(user_id, profile_url)`), warna do bande ek hi job save nahi kar paate.
+
+**Purana data**
+
+Multi-user se pehle ki rows ka `user_id` NULL hai. **Pehla signup** unhe adopt
+kar leta hai (`users.adopt_orphans`) — isliye apna account sabse pehle banao,
+warna tumhari history kisi aur ke paas chali jaayegi.
+
+**Deploy par**
+
+`COOKIE_SECURE=1` set karo — warna session cookie plain http par bhi jaayegi.
+`APP_SECRET_KEY` set na ho to koi user apni keys hi save nahi kar paayega.
+
+---
+
 ## Files
 
 | File | Kaam |
@@ -78,11 +147,14 @@ uvicorn app.main:app --reload --port 10000
 | `app/llm.py` | OpenRouter calls — `deepseek/deepseek-v4-pro`. Do kaam: JD parse karna + jobs ko score karna |
 | `app/apify.py` | Dono scrapers chalata hai, output normalize karta hai, duplicates hatata hai |
 | `app/outreach.py` | Founder-ya-HR ka rule + LinkedIn people-search link. Threshold `config.FOUNDER_MAX_EMPLOYEES` |
+| `app/people.py` | Company ke decision makers Apify se — bucket ke titles, aur `works_at()` company filter |
+| `app/connect.py` | Connection request bhejna. Provider interface (apify / unipile) + rate limiting + cookie verify |
+| `app/crypto.py` | Sender cookie ko Fernet se seal/unseal karta hai. Key: `APP_SECRET_KEY` |
 | `app/docs.py` | markitdown wrapper — PDF/DOCX se text nikaalta hai (local, koi LLM call nahi) |
 | `app/db.py` | Postgres connection pool + migration runner (`migrations/*.sql`) |
-| `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, outreach, stats |
+| `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, outreach, contacts, senders, stats |
 | `app/config.py` | `.env` load, limits, allowed file types, `DATABASE_URL`, `APP_PASSWORD` |
-| `app/auth.py` | Optional HTTP Basic password gate — `APP_PASSWORD` set ho tabhi lagta hai |
+| `app/users.py` | Accounts, scrypt passwords, server-side sessions, per-user API keys |
 | `migrate.py` | Migrations alag se chalane ka CLI |
 | `migrations/*.sql` | Schema. File ka number hi version hai (`0001_init.sql` → 1) |
 | `public/index.html` | **Poora frontend** — React app (single-file), Tailwind theme, JD attach bar, NDJSON stream, table sort/filter/CSV |
@@ -96,7 +168,7 @@ uvicorn app.main:app --reload --port 10000
 
 | Endpoint | Kya karta hai |
 |---|---|
-| `GET /api/health` | model name + `.env` me keys hain ya nahi + DB status |
+| `GET /api/health` | Public. Model name, `secretReady`, DB status. Koi user data nahi |
 | `POST /api/extract` | multipart `file` → `{ text, chars, words, filename }` |
 | `POST /api/search` | `{ jobDescription, limit, source, useAi, titleOverride }` → NDJSON stream (run DB me save hoti hai). `titleOverride` set ho to wahi scrape keyword banta hai, model ka guess nahi |
 | `POST /api/recommend` | `{ profile, jobs, searchId }` → `{ plan, usage, model }` — skill gaps + 15/30 din ka plan |
@@ -111,6 +183,21 @@ uvicorn app.main:app --reload --port 10000
 | `DELETE /api/saved?key=<job url>` | Shortlist se hatao |
 | `GET /api/stats` | Overview ke tiles — searches, roles, spend, average match |
 | `POST /api/import` | Purana localStorage data ek baar DB me — UI khud call karta hai |
+| `POST /api/auth/signup` | `{ email, password, name? }` → account + session cookie. Pehla user orphan rows adopt karta hai |
+| `POST /api/auth/login` | `{ email, password }` → session cookie |
+| `POST /api/auth/logout` | Session row delete — token sach me mar jaata hai |
+| `GET /api/auth/me` | `{ user }` ya `{ user: null }`. Frontend boot par yahi poochta hai |
+| `POST /api/auth/password` | `{ current, new }` → password badlo (baaki sab sessions gir jaate hain) |
+| `POST /api/auth/keys` | `{ apify?, openRouter? }` → apni keys save karo (sealed). `null` = mat chhedo, `""` = hata do |
+| `GET /api/senders` | Sender accounts + `secretReady`. **Cookie kabhi wapas nahi aati** — sirf `hasCookie` |
+| `POST /api/senders` | `{ id?, label, liAt, jsessionid?, isPremium }` → cookie encrypt ho kar save. `liAt` khaali = purani cookie waise hi rehti hai |
+| `POST /api/senders/{id}/verify` | Ek GET se dekhta hai cookie zinda hai ya nahi → `ready` / `expired` / `unknown`. Koi invite nahi jaata |
+| `POST /api/senders/{id}/default` | Is account ko default sender banao |
+| `DELETE /api/senders/{id}` | Account + uski sealed cookie mita do |
+| `GET /api/contacts` | `?jobKey=...` → mile hue decision makers, har ek ka latest request status ke saath |
+| `POST /api/contacts/discover` | `{ job, target?, employees?, limit }` → company ke founder/CTO ya HR (cookie nahi chahiye) |
+| `DELETE /api/contacts/{id}` | Ek contact hatao |
+| `POST /api/connect/send` | `{ contactIds, notes, senderId? }` → NDJSON stream. Ek baar me max 10, beech me ~25s gap |
 
 `/api/search` ke stream events:
 
@@ -121,6 +208,17 @@ uvicorn app.main:app --reload --port 10000
 {"type":"partial","jobs":[...],"params":{...}}
 {"type":"done","searchId":12,"jobs":[...],"params":{...},"usage":{...},"model":"..."}
 {"type":"error","message":"..."}
+```
+
+`/api/connect/send` ke stream events:
+
+```
+{"type":"start","count":5,"noteLimit":200}
+{"type":"sending","contactId":12,"name":"..."}
+{"type":"waiting","contactId":13,"seconds":27}
+{"type":"result","contactId":12,"status":"sent|failed","error":null,"runUrl":"..."}
+{"type":"skipped","contactId":14,"name":"...","reason":"Already invited"}
+{"type":"done","sent":4,"failed":1,"results":[...]}
 ```
 
 ---
@@ -193,7 +291,9 @@ Do cheezein jaan-boojh kar aise hain:
 Migrations pehli deploy par khud chal jaati hain — logs me
 `migrations applied: 0001_init.sql` dikhega. Alag se koi step nahi.
 
-**`APP_PASSWORD` zaroor set karo.** Bina uske URL jisko bhi mila wo search chala
+**`APP_SECRET_KEY` aur `COOKIE_SECURE=1` zaroor set karo.** (Purana `APP_PASSWORD`
+gate hat chuka hai — ab accounts hain.) Bina secret key ke koi user apni keys
+save nahi kar paayega. Pehle ye padho: URL jisko bhi mila wo signup kar
 kar tumhare Apify credits aur OpenRouter tokens jala sakta hai. Set karte hi
 browser khud username/password maangta hai (user default `admin`, `APP_USERNAME`
 se badal sakte ho). Sirf `/api/health` khula rehta hai taaki host ka uptime check
@@ -314,8 +414,8 @@ me hai, model par nahi chhoda gaya (`app/outreach.py`):
 
 | Company size | Kis tak jaana hai |
 |---|---|
-| `< FOUNDER_MAX_EMPLOYEES` (default **150**) | **Founder / CEO** — itni chhoti team me inbound founder khud padhta hai |
-| `>= 150` | **HR / Recruiter** — is size par hiring TA team ke through hi chalti hai |
+| `< FOUNDER_MAX_EMPLOYEES` (default **50**) | **Founder / CTO** — itni chhoti team me inbound founder khud padhta hai |
+| `>= 50` | **HR / Recruiter** — is size par hiring TA team ke through hi chalti hai |
 | size pata hi nahi chali | **HR** — bade organisation ke CEO ko DM karna ulta padta hai, isliye safer route |
 
 - Har pipeline row par **Reach out** button. Dabate hi model (a) company kitni
@@ -328,15 +428,84 @@ me hai, model par nahi chhoda gaya (`app/outreach.py`):
 - Draft me: target chip + wajah, size estimate aur uski confidence, **subject**,
   poora **message**, **LinkedIn connection note** (300 char limit ke saath), aur
   **follow-up** line — har block par copy button
-- **Contact details nahi nikaale jaate.** Us company ke founder/recruiter ka
-  ready-made LinkedIn people-search link milta hai — kis par click karna hai wo
-  tum decide karte ho
+- Draft ke saath ready-made LinkedIn people-search link bhi milta hai. Asli log
+  chahiye to **Find people** — neeche "Decision makers" section dekho
 - Sidebar me **Contacts** view — jitne drafts bane hain sab ek jagah, *All /
   Founders / HR* tabs ke saath. Drafts `outreach` table me search ke saath jude
   rehte hain, isliye purani run kholne par wapas aa jaate hain
 - Message tumhare resume/profile se likha jaata hai (wahi text jo JD box me hai),
   isliye kam se kam 20 characters chahiye. Ek job ka draft ek hi baar banta hai —
   dobara chahiye to modal me **Redraft**
+
+### Decision makers + connection requests
+
+Draft ban gaya, ab us company me **asli log** kaun hain aur unhe invite kaise
+bheje. Do alag cheezein hain, aur inki zarooratein bhi alag hain:
+
+| Step | Cookie chahiye? | Kya lagta hai |
+|---|---|---|
+| **Find people** — company ke founder/CTO ya HR dhoondhna | ❌ nahi | Apify actor, public profile data, ~$0.002/profile |
+| **Send request** — connection request + note bhejna | ✅ haan | LinkedIn `li_at` cookie + paid connect actor (ya Unipile) |
+
+**Sender account (Settings me)**
+
+- Settings → **LinkedIn sender account** → cookie paste karo. Browser me LinkedIn
+  kholo → DevTools → Application → Cookies → linkedin.com → `li_at` ki value copy
+- Cookie DB me **Fernet se encrypt** ho kar jaati hai (`app/crypto.py`), key
+  `APP_SECRET_KEY` se banti hai. **Key set nahi hai to cookie save hi nahi hoti** —
+  plain text me rakhne se behtar hai feature band rahe
+- Cookie kabhi browser ko wapas nahi bheji jaati. Save ke baad field khaali hi
+  dikhta hai; sirf "saved" badge se pata chalta hai
+- **Check cookie** button ek GET karta hai (koi invite nahi jaata) aur batata hai
+  cookie zinda hai ya expire ho chuki. Redirects follow hote hain — mari hui
+  cookie par LinkedIn pehle `/feed/` ko 200 deta dikhta hai, asli login page do
+  hop baad aata hai
+
+**Bhejna (Outreach view)**
+
+- Kisi bhi drafted company par **Find people** → mile hue log neeche table me
+- Checkbox se 5–7 chuno, ek note likho, **Send N connection requests**
+- Requests **ek-ek kar ke** jaati hain, beech me ~25s ka random gap. Das invite
+  ek second me jaana LinkedIn ke liye sabse saaf bot signal hai
+- Ek insaan ko dobara invite nahi jaata — `connection_requests` par partial
+  unique index isko DB par hi rokta hai
+
+**Limits — dhyan se padho**
+
+- Ek send me **10** (`MAX_BATCH_INVITES`), ek din me **20**, ek hafte me **100**.
+  LinkedIn ki apni limit ~100–200/week hai; hum uske aas-paas bhi nahi jaate
+- Counter sirf **sach me gaye** invites par badhta hai, fail hue par nahi
+- **Free LinkedIn account par note ~5/month par khatam ho jaata hai** aur 200
+  char me katta hai (Premium: koi monthly cap nahi, 300 char). Iske baad invite
+  jaata hai par note ke bina. UI Settings me ye warning dikhata hai
+- Ye automation LinkedIn ke User Agreement §8.2 ke khilaf hai. Restriction jis
+  account ki cookie hai usi par lagti hai
+
+**Actor ki ek asli kami**
+
+Default people actor (`apt_marble/...`) ek **keyword search** hai, company ka
+roster nahi. "Zerodha" maango to duniya bhar ke founders aa jaate hain. Isliye
+`app/people.py` ka `works_at()` har profile ko company ke against check karta
+hai aur jo match na kare use **gira deta hai** — galat aadmi ko "aapki company
+me role dekha" wala note bhejna sabse bura outcome hai.
+
+Natija: is actor se aksar **0 results** aate hain. Sahi results chahiye to
+company-roster wala actor lagao (rental chahiye):
+
+```
+PEOPLE_ACTOR=memo23/linkedin-company-people-scraper
+```
+
+`app/people.py` ka `_actor_input()` dono ko sambhalta hai. Naya actor lagana ho
+to sirf wahan ek entry jodo.
+
+**Bhejne ka provider**
+
+`CONNECT_PROVIDER=apify` (default) ya `unipile`. Apify ke connect actors saste
+hain par bharose ke laayak kam — store par inke success rate 0–44% dikhte hain,
+aur zyadatar rental maangte hain. Unipile paid hai (~€40/mo) par asal me chalta
+hai aur cookie unke paas rehti hai, hamare paas nahi. `app/connect.py` dono ko
+ek interface ke peeche rakhta hai, isliye switch karna sirf env var badalna hai.
 
 ---
 
