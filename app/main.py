@@ -5,18 +5,22 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Literal
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, db, docs, outreach, store
-from .auth import BasicAuth
+from . import config, connect, crypto, db, docs, outreach, store, users
+from . import people as people_mod
 from .apify import scrape_jobs
 from .llm import MODEL_ID, build_learning_plan, draft_outreach, extract_search_params, score_jobs
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
 log = logging.getLogger("hiring-agent")
+
+# Ye do baar-baar chahiye hote hain — ek hi jagah likhe taaki wording na bhatke.
+APIFY_MISSING = "Add your Apify API key in Settings before running this"
+OPENROUTER_MISSING = "Add your OpenRouter API key in Settings before running this"
 
 
 @asynccontextmanager
@@ -30,6 +34,9 @@ async def lifespan(_: FastAPI):
         stale = await store.close_stale_searches()
         if stale:
             log.info("%s interrupted search(es) from a previous run marked closed", stale)
+        gone = await users.purge_expired_sessions()
+        if gone:
+            log.info("%s expired session(s) removed", gone)
         log.info("database ready (schema: %s)", config.DB_SCHEMA)
     yield
     await db.close()
@@ -74,19 +81,157 @@ class ImportRequest(BaseModel):
     saved: list[dict] = Field(default_factory=list)
 
 
+# ─────────────────────────── accounts ───────────────────────────
+# Har banda apna account banata hai aur apni API keys deta hai. Server ki
+# .env wali keys kisi aur user ko nahi milti — warna pehla ajnabi hi baaki
+# sabke Apify credits jala deta.
+
+
+class SignupRequest(BaseModel):
+    email: str = ""
+    password: str = ""
+    name: str | None = None
+
+
+class LoginRequest(BaseModel):
+    email: str = ""
+    password: str = ""
+
+
+class PasswordRequest(BaseModel):
+    current: str = ""
+    new: str = ""
+
+
+class KeysRequest(BaseModel):
+    # None = jaisi hai waisi rehne do. "" = hata do.
+    apify: str | None = None
+    openRouter: str | None = None
+
+
+def _session_response(payload: dict, token: str, expires) -> JSONResponse:
+    res = JSONResponse(payload)
+    # httponly: JS cookie ko chhu bhi nahi sakta, isliye XSS se session nahi
+    # churaya ja sakta. samesite=lax: normal navigation par cookie jaati hai
+    # par cross-site POST par nahi.
+    res.set_cookie(
+        users.SESSION_COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=config.COOKIE_SECURE,
+        max_age=users.SESSION_DAYS * 24 * 3600,
+        expires=expires,
+        path="/",
+    )
+    return res
+
+
+async def current_user(request: Request) -> dict:
+    """Har protected route ka pehla darwaza."""
+    if not db.enabled():
+        raise HTTPException(status_code=503, detail="Database is not connected — accounts are unavailable")
+    user = await users.user_for_session(request.cookies.get(users.SESSION_COOKIE))
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in to continue")
+    return user
+
+
+async def user_keys(user: dict) -> dict:
+    """Us user ki apni keys. Set nahi hain to None — caller saaf error deta hai."""
+    return await users.get_keys(user["id"])
+
+
+@app.post("/api/auth/signup")
+async def signup(req: SignupRequest, request: Request) -> JSONResponse:
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected — accounts cannot be created"}, status_code=503)
+    try:
+        user = await users.create_user(req.email, req.password, req.name)
+    except users.AuthError as err:
+        return JSONResponse({"error": str(err)}, status_code=400)
+    except Exception as err:
+        log.exception("signup failed")
+        return JSONResponse({"error": f"Could not create the account: {err}"}, status_code=500)
+
+    token, expires = await users.start_session(user["id"], request.headers.get("user-agent"))
+    return _session_response({"ok": True, "user": user}, token, expires)
+
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest, request: Request) -> JSONResponse:
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected — sign-in is unavailable"}, status_code=503)
+    try:
+        user = await users.authenticate(req.email, req.password)
+    except users.AuthError as err:
+        return JSONResponse({"error": str(err)}, status_code=401)
+
+    token, expires = await users.start_session(user["id"], request.headers.get("user-agent"))
+    return _session_response({"ok": True, "user": user}, token, expires)
+
+
+@app.post("/api/auth/logout")
+async def logout(request: Request) -> JSONResponse:
+    await users.end_session(request.cookies.get(users.SESSION_COOKIE))
+    res = JSONResponse({"ok": True})
+    res.delete_cookie(users.SESSION_COOKIE, path="/")
+    return res
+
+
+@app.get("/api/auth/me")
+async def whoami(request: Request) -> JSONResponse:
+    """Frontend boot par yahi poochta hai — 401 matlab login screen dikhao."""
+    if not db.enabled():
+        return JSONResponse({"user": None, "db": db.status()})
+    user = await users.user_for_session(request.cookies.get(users.SESSION_COOKIE))
+    if not user:
+        return JSONResponse({"user": None, "db": db.status()})
+    return JSONResponse({"user": user, "db": db.status()})
+
+
+@app.post("/api/auth/password")
+async def update_password(req: PasswordRequest, user: dict = Depends(current_user)) -> JSONResponse:
+    try:
+        await users.change_password(user["id"], req.current, req.new)
+    except users.AuthError as err:
+        return JSONResponse({"error": str(err)}, status_code=400)
+    # Sab sessions gir chuke — apni cookie bhi saaf kar dete hain.
+    res = JSONResponse({"ok": True, "message": "Password changed — sign in again"})
+    res.delete_cookie(users.SESSION_COOKIE, path="/")
+    return res
+
+
+@app.post("/api/auth/keys")
+async def save_api_keys(req: KeysRequest, user: dict = Depends(current_user)) -> JSONResponse:
+    if (req.apify or req.openRouter) and not crypto.ready():
+        return JSONResponse(
+            {"error": "APP_SECRET_KEY is not set on the server, so API keys cannot be encrypted. "
+                      "Ask the admin to set it in .env."},
+            status_code=400,
+        )
+    try:
+        updated = await users.save_keys(user["id"], apify=req.apify, openrouter=req.openRouter)
+    except Exception as err:
+        return JSONResponse({"error": f"Could not save the keys: {err}"}, status_code=500)
+    return JSONResponse({"ok": True, "user": updated})
+
+
 @app.get("/api/health")
 async def health() -> dict:
+    """Public — login screen ko bhi chahiye. Yahan kisi user ka data nahi jaata."""
     return {
         "ok": True,
         "model": MODEL_ID,
-        "apifyKey": bool(config.APIFY_API_KEY),
-        "openRouterKey": bool(config.OPENROUTER_API_KEY),
+        # Keys ab har user ki apni hoti hain; ye sirf batata hai ki server par
+        # cookie/keys encrypt karne ka intezaam hai ya nahi.
+        "secretReady": crypto.ready(),
         "db": db.status(),
     }
 
 
 @app.post("/api/extract")
-async def extract(file: UploadFile = File(...)) -> JSONResponse:
+async def extract(file: UploadFile = File(...), user: dict = Depends(current_user)) -> JSONResponse:
     """PDF/DOCX se JD ka text nikaalta hai — markitdown local chalta hai, koi LLM cost nahi."""
     data = await file.read()
 
@@ -113,7 +258,7 @@ async def extract(file: UploadFile = File(...)) -> JSONResponse:
 
 
 @app.post("/api/recommend")
-async def recommend(req: RecommendRequest) -> JSONResponse:
+async def recommend(req: RecommendRequest, user: dict = Depends(current_user)) -> JSONResponse:
     """Scored postings ke gaps se 15/30 din ka upskilling plan banata hai."""
     profile = (req.profile or "").strip()
 
@@ -121,17 +266,20 @@ async def recommend(req: RecommendRequest) -> JSONResponse:
         return JSONResponse({"error": "Add your resume or profile first (at least 20 characters)"}, status_code=400)
     if not req.jobs:
         return JSONResponse({"error": "Run a search first — there are no postings to analyse"}, status_code=400)
-    if not config.OPENROUTER_API_KEY:
-        return JSONResponse({"error": "OPENROUTER_API_KEY not found in .env"}, status_code=500)
+
+    keys = await user_keys(user)
+    if not keys["openrouter"]:
+        return JSONResponse({"error": OPENROUTER_MISSING}, status_code=400)
 
     try:
-        result = await build_learning_plan(profile, req.jobs, config.OPENROUTER_API_KEY)
+        result = await build_learning_plan(profile, req.jobs, keys["openrouter"])
     except Exception as err:
         return JSONResponse({"error": f"Could not build a plan: {err}"}, status_code=502)
 
     # Plan bhi search ke saath DB me rehta hai — history kholte hi wapas mil jaata hai.
     try:
         await store.save_plan(
+            user_id=user["id"],
             search_id=req.searchId,
             profile=profile,
             plan=result["plan"],
@@ -145,27 +293,30 @@ async def recommend(req: RecommendRequest) -> JSONResponse:
 
 
 @app.post("/api/search")
-async def search(req: SearchRequest):
+async def search(req: SearchRequest, user: dict = Depends(current_user)):
     job_description = (req.jobDescription or "").strip()
 
     if len(job_description) < 20:
         return JSONResponse({"error": "Job description must be at least 20 characters"}, status_code=400)
-    if not config.APIFY_API_KEY:
-        return JSONResponse({"error": "APIFY_API_KEY not found in .env"}, status_code=500)
-    if req.useAi and not config.OPENROUTER_API_KEY:
-        return JSONResponse({"error": "OPENROUTER_API_KEY not found in .env"}, status_code=500)
+
+    keys = await user_keys(user)
+    if not keys["apify"]:
+        return JSONResponse({"error": APIFY_MISSING}, status_code=400)
+    if req.useAi and not keys["openrouter"]:
+        return JSONResponse({"error": OPENROUTER_MISSING}, status_code=400)
 
     capped_limit = min(config.MAX_LIMIT, max(config.MIN_LIMIT, req.limit))
 
     # NDJSON stream: har line ek event, taaki UI live progress dikha sake.
     return StreamingResponse(
-        _search_stream(req, job_description, capped_limit),
+        _search_stream(req, job_description, capped_limit, user, keys),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-async def _search_stream(req: SearchRequest, job_description: str, limit: int) -> AsyncIterator[str]:
+async def _search_stream(req: SearchRequest, job_description: str, limit: int,
+                         user: dict, keys: dict) -> AsyncIterator[str]:
     queue: asyncio.Queue = asyncio.Queue()
     search_id: int | None = None
     finished = False
@@ -182,6 +333,7 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
             # Row pehle ban jaati hai taaki adhoori/fail hui runs bhi dikh sakein.
             try:
                 search_id = await store.start_search(
+                    user_id=user["id"],
                     job_description=job_description,
                     limit=limit,
                     source=req.source,
@@ -199,7 +351,7 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
 
             if req.useAi:
                 await progress("parse", f"{MODEL_ID} is reading the job description...")
-                extracted = await extract_search_params(job_description, config.OPENROUTER_API_KEY)
+                extracted = await extract_search_params(job_description, keys["openrouter"])
                 params = extracted["params"]
             else:
                 # AI off ho to JD ki pehli line ko hi search keyword maan lete hain.
@@ -221,7 +373,7 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
                 country=params["country"],
                 limit=limit,
                 source=req.source,
-                token=config.APIFY_API_KEY,
+                token=keys["apify"],
                 on_progress=progress,
             )
             await progress("scrape", f"Found {len(jobs)} unique jobs in total")
@@ -237,7 +389,7 @@ async def _search_stream(req: SearchRequest, job_description: str, limit: int) -
                 scored = await score_jobs(
                     job_description,
                     jobs,
-                    config.OPENROUTER_API_KEY,
+                    keys["openrouter"],
                     batch_size=req.batchSize,
                     on_progress=progress,
                 )
@@ -300,7 +452,7 @@ def _background(coro) -> None:
 # ─────────────────────────── reach out ───────────────────────────
 
 @app.post("/api/outreach")
-async def outreach_draft(req: OutreachRequest) -> JSONResponse:
+async def outreach_draft(req: OutreachRequest, user: dict = Depends(current_user)) -> JSONResponse:
     """Ek posting ke liye reach-out draft — chhoti company me founder, badi me HR."""
     profile = (req.profile or "").strip()
 
@@ -308,11 +460,13 @@ async def outreach_draft(req: OutreachRequest) -> JSONResponse:
         return JSONResponse({"error": "No job supplied"}, status_code=400)
     if len(profile) < 20:
         return JSONResponse({"error": "Add your resume or profile first (at least 20 characters)"}, status_code=400)
-    if not config.OPENROUTER_API_KEY:
-        return JSONResponse({"error": "OPENROUTER_API_KEY not found in .env"}, status_code=500)
+
+    keys = await user_keys(user)
+    if not keys["openrouter"]:
+        return JSONResponse({"error": OPENROUTER_MISSING}, status_code=400)
 
     try:
-        result = await draft_outreach(req.job, profile, config.OPENROUTER_API_KEY,
+        result = await draft_outreach(req.job, profile, keys["openrouter"],
                                       threshold=config.FOUNDER_MAX_EMPLOYEES)
     except Exception as err:
         return JSONResponse({"error": f"Could not draft the message: {err}"}, status_code=502)
@@ -322,6 +476,7 @@ async def outreach_draft(req: OutreachRequest) -> JSONResponse:
 
     try:
         await store.save_outreach(
+            user_id=user["id"],
             search_id=req.searchId,
             job_key=store.job_key(req.job),
             draft=draft,
@@ -335,96 +490,436 @@ async def outreach_draft(req: OutreachRequest) -> JSONResponse:
 
 
 @app.get("/api/outreach")
-async def outreach_for_search(searchId: int) -> JSONResponse:
+async def outreach_for_search(searchId: int, user: dict = Depends(current_user)) -> JSONResponse:
     """Purani search kholne par uske saare drafts wapas."""
-    return JSONResponse({"drafts": await store.list_outreach(searchId)})
+    return JSONResponse({"drafts": await store.list_outreach(searchId, user["id"])})
 
 
 # ─────────────────────────── history (DB) ───────────────────────────
 
 @app.get("/api/searches")
-async def list_searches(limit: int = 25, all: bool = False) -> JSONResponse:
+async def list_searches(limit: int = 25, all: bool = False,
+                        user: dict = Depends(current_user)) -> JSONResponse:
     if not db.enabled():
         return JSONResponse({"searches": [], "db": db.status()})
-    rows = await store.list_searches(limit=max(1, min(100, limit)), include_all=all)
+    rows = await store.list_searches(user["id"], limit=max(1, min(100, limit)), include_all=all)
     return JSONResponse({"searches": rows, "db": db.status()})
 
 
 @app.get("/api/searches/{search_id}")
-async def get_search(search_id: int) -> JSONResponse:
-    row = await store.get_search(search_id)
+async def get_search(search_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+    row = await store.get_search(search_id, user["id"])
     if not row:
         return JSONResponse({"error": "Search not found"}, status_code=404)
     return JSONResponse(row)
 
 
 @app.delete("/api/searches/{search_id}")
-async def delete_search(search_id: int) -> JSONResponse:
-    deleted = await store.delete_search(search_id)
+async def delete_search(search_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+    deleted = await store.delete_search(search_id, user["id"])
     if not deleted:
         return JSONResponse({"error": "Search not found"}, status_code=404)
     return JSONResponse({"ok": True, "deleted": deleted})
 
 
 @app.delete("/api/searches")
-async def clear_searches() -> JSONResponse:
-    return JSONResponse({"ok": True, "deleted": await store.clear_searches()})
+async def clear_searches(user: dict = Depends(current_user)) -> JSONResponse:
+    return JSONResponse({"ok": True, "deleted": await store.clear_searches(user["id"])})
 
 
 # ─────────────────────────── shortlist (DB) ───────────────────────────
 
 @app.get("/api/saved")
-async def list_saved() -> JSONResponse:
-    return JSONResponse({"saved": await store.list_saved()})
+async def list_saved(user: dict = Depends(current_user)) -> JSONResponse:
+    return JSONResponse({"saved": await store.list_saved(user["id"])})
 
 
 @app.post("/api/saved")
-async def add_saved(req: SaveRequest) -> JSONResponse:
+async def add_saved(req: SaveRequest, user: dict = Depends(current_user)) -> JSONResponse:
     if not req.job:
         return JSONResponse({"error": "No job supplied"}, status_code=400)
     if not db.enabled():
         return JSONResponse({"error": "Database is not connected — shortlist cannot be saved"}, status_code=503)
     try:
-        job = await store.add_saved(req.job, req.searchId)
+        job = await store.add_saved(req.job, req.searchId, user_id=user["id"])
     except Exception as err:
         # Sabse aam wajah: searchId ki row beech me delete ho gayi.
         log.warning("could not save job: %s", err)
         try:
-            job = await store.add_saved(req.job, None)
+            job = await store.add_saved(req.job, None, user_id=user["id"])
         except Exception as retry_err:
             return JSONResponse({"error": f"Could not save this job: {retry_err}"}, status_code=500)
     return JSONResponse({"ok": True, "job": job, "key": store.job_key(req.job)})
 
 
 @app.delete("/api/saved")
-async def remove_saved(key: str) -> JSONResponse:
-    return JSONResponse({"ok": True, "deleted": await store.remove_saved(key)})
+async def remove_saved(key: str, user: dict = Depends(current_user)) -> JSONResponse:
+    return JSONResponse({"ok": True, "deleted": await store.remove_saved(key, user["id"])})
 
 
 # ─────────────────────────── overview + import ───────────────────────────
 
 @app.get("/api/stats")
-async def stats() -> JSONResponse:
+async def stats(user: dict = Depends(current_user)) -> JSONResponse:
     if not db.enabled():
         return JSONResponse({"searches": 0, "roles": 0, "spend": 0.0, "avgScore": None, "saved": 0, "db": db.status()})
-    return JSONResponse({**await store.stats(), "db": db.status()})
+    return JSONResponse({**await store.stats(user["id"]), "db": db.status()})
 
 
 @app.post("/api/import")
-async def import_legacy(req: ImportRequest) -> JSONResponse:
+async def import_legacy(req: ImportRequest, user: dict = Depends(current_user)) -> JSONResponse:
     """Browser me pade purane searches/saved jobs ko ek baar DB me le aata hai."""
     if not db.enabled():
         return JSONResponse({"error": "Database is not connected"}, status_code=503)
-    result = await store.import_legacy(req.searches, req.saved)
+    result = await store.import_legacy(req.searches, req.saved, user_id=user["id"])
     return JSONResponse({"ok": True, **result})
+
+
+# ─────────────────── sender accounts (LinkedIn se bhejne wala) ───────────────────
+# Cookie yahan aati hai aur yahin ruk jaati hai — response me kabhi wapas nahi
+# jaati. UI sirf hasCookie/status dekhta hai.
+
+class SenderRequest(BaseModel):
+    id: int | None = None
+    label: str = "My LinkedIn"
+    # Khaali chhod do to purani cookie waise hi rehti hai.
+    liAt: str | None = None
+    jsessionid: str | None = None
+    userAgent: str | None = None
+    isPremium: bool = False
+    provider: Literal["apify", "unipile"] = "apify"
+
+
+class DiscoverRequest(BaseModel):
+    job: dict = Field(default_factory=dict)
+    # 'founder' ya 'hr'. Na do to employees se rule khud tay karta hai.
+    target: str | None = None
+    employees: int | None = None
+    location: str | None = None
+    limit: int = Field(default=10, ge=1, le=25)
+    searchId: int | None = None
+
+
+class SendRequest(BaseModel):
+    contactIds: list[int] = Field(default_factory=list)
+    # contactId -> note. Jo yahan na ho uske liye draft ka note use hota hai.
+    notes: dict[str, str] = Field(default_factory=dict)
+    senderId: int | None = None
+
+
+@app.get("/api/senders")
+async def list_senders(user: dict = Depends(current_user)) -> JSONResponse:
+    if not db.enabled():
+        return JSONResponse({"senders": [], "secretReady": crypto.ready(), "db": db.status()})
+    return JSONResponse({
+        "senders": await store.list_senders(user["id"]),
+        "secretReady": crypto.ready(),
+        "provider": config.CONNECT_PROVIDER,
+        "db": db.status(),
+    })
+
+
+@app.post("/api/senders")
+async def save_sender(req: SenderRequest, user: dict = Depends(current_user)) -> JSONResponse:
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected — the sender account cannot be stored"}, status_code=503)
+
+    label = (req.label or "").strip() or "My LinkedIn"
+    li_at = (req.liAt or "").strip() or None
+
+    # Nayi cookie aa rahi hai to encryption key honi hi chahiye. Bina uske
+    # save karna matlab plain text — wo hum nahi karte.
+    if li_at and not crypto.ready():
+        return JSONResponse(
+            {"error": "APP_SECRET_KEY is not set in .env — it is required before a LinkedIn cookie can be stored. "
+                      "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""},
+            status_code=400,
+        )
+    if not req.id and not li_at:
+        return JSONResponse({"error": "Paste your li_at cookie to add a sender account"}, status_code=400)
+
+    try:
+        sender = await store.save_sender(
+            user_id=user["id"],
+            sender_id=req.id,
+            label=label,
+            li_at=li_at,
+            jsessionid=(req.jsessionid or "").strip() or None,
+            user_agent=(req.userAgent or "").strip() or None,
+            is_premium=req.isPremium,
+            provider=req.provider,
+        )
+    except crypto.SecretMissing as err:
+        return JSONResponse({"error": str(err)}, status_code=400)
+    except Exception as err:
+        return JSONResponse({"error": f"Could not save the account: {err}"}, status_code=500)
+
+    if not sender:
+        return JSONResponse({"error": "Sender account not found"}, status_code=404)
+    return JSONResponse({"ok": True, "sender": sender})
+
+
+@app.post("/api/senders/{sender_id}/verify")
+async def verify_sender(sender_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+    """Ek GET se dekhta hai ki cookie zinda hai — koi invite nahi jaata."""
+    secrets_row = await store.sender_secrets(sender_id, user["id"])
+    if not secrets_row:
+        return JSONResponse({"error": "Sender account not found"}, status_code=404)
+
+    if secrets_row.get("provider") == "unipile":
+        status, detail = ("ready", "Unipile handles the session for this account")
+    elif not secrets_row.get("li_at"):
+        status, detail = (
+            "unverified",
+            "No usable cookie — if APP_SECRET_KEY changed, paste the li_at cookie again",
+        )
+    else:
+        status, detail = await connect.verify_cookie(secrets_row["li_at"], secrets_row.get("userAgent"))
+
+    sender = await store.mark_sender_status(sender_id, status, detail)
+    return JSONResponse({"ok": True, "sender": sender, "status": status, "detail": detail})
+
+
+@app.post("/api/senders/{sender_id}/default")
+async def make_default_sender(sender_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+    await store.set_default_sender(sender_id, user["id"])
+    return JSONResponse({"ok": True, "senders": await store.list_senders(user["id"])})
+
+
+@app.delete("/api/senders/{sender_id}")
+async def remove_sender(sender_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+    deleted = await store.delete_sender(sender_id, user["id"])
+    if not deleted:
+        return JSONResponse({"error": "Sender account not found"}, status_code=404)
+    return JSONResponse({"ok": True, "deleted": deleted})
+
+
+# ─────────────────────────── decision makers ───────────────────────────
+
+@app.get("/api/contacts")
+async def list_contacts(jobKey: str | None = None, limit: int = 200,
+                        user: dict = Depends(current_user)) -> JSONResponse:
+    if not db.enabled():
+        return JSONResponse({"contacts": []})
+    return JSONResponse(
+        {"contacts": await store.list_contacts(user["id"], jobKey, max(1, min(500, limit)))}
+    )
+
+
+@app.post("/api/contacts/discover")
+async def discover_contacts(req: DiscoverRequest, user: dict = Depends(current_user)) -> JSONResponse:
+    """Ek company ke decision makers Apify se — cookie ki zaroorat nahi."""
+    company = (req.job.get("company") or "").strip()
+
+    if not company:
+        return JSONResponse({"error": "This posting has no company name to search on"}, status_code=400)
+
+    keys = await user_keys(user)
+    if not keys["apify"]:
+        return JSONResponse({"error": APIFY_MISSING}, status_code=400)
+
+    # Target diya ho to wahi; warna wahi rule jo draft me chalta hai.
+    target = req.target if req.target in (outreach.FOUNDER, outreach.HR) else None
+    if not target:
+        target, _ = outreach.decide_target(req.employees, "high" if req.employees else "low")
+
+    try:
+        people = await people_mod.find_decision_makers(
+            company=company,
+            target=target,
+            location=req.location or req.job.get("location"),
+            limit=req.limit,
+            token=keys["apify"],
+        )
+    except Exception as err:
+        return JSONResponse({"error": f"Could not find people at {company}: {err}"}, status_code=502)
+
+    if not people:
+        return JSONResponse({
+            "contacts": [],
+            "target": target,
+            "message": f"No public {'founder/CTO' if target == outreach.FOUNDER else 'HR'} profile could be "
+                       f"confirmed at {company}. Profiles that do not actually list this company are dropped "
+                       f"rather than shown, so you never message the wrong person.",
+        })
+
+    try:
+        saved = await store.save_contacts(
+            people, user_id=user["id"], job_key=store.job_key(req.job),
+            search_id=req.searchId, employees=req.employees,
+        )
+    except Exception as err:
+        log.warning("contacts could not be saved: %s", err)
+        saved = people   # DB down — table phir bhi bhar do, bas persist nahi hoga
+
+    return JSONResponse({"contacts": saved, "target": target, "company": company})
+
+
+@app.delete("/api/contacts/{contact_id}")
+async def remove_contact(contact_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+    return JSONResponse({"ok": True, "deleted": await store.delete_contact(contact_id, user["id"])})
+
+
+# ─────────────────────────── connection requests ───────────────────────────
+
+@app.post("/api/connect/send")
+async def send_connections(req: SendRequest, user: dict = Depends(current_user)):
+    """Chune hue logon ko connection request + note.
+
+    Stream isliye hai ki har invite ke beech ~25s ka gap hai: 7 log matlab
+    do-teen minute. Bina live update ke UI mara hua lagta.
+    """
+    if not req.contactIds:
+        return JSONResponse({"error": "Select at least one person"}, status_code=400)
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected — sending is disabled"}, status_code=503)
+
+    if len(req.contactIds) > config.MAX_BATCH_INVITES:
+        return JSONResponse(
+            {"error": f"Send at most {config.MAX_BATCH_INVITES} at a time — LinkedIn flags bursts"},
+            status_code=400,
+        )
+
+    keys = await user_keys(user)
+    if not keys["apify"] and config.CONNECT_PROVIDER != "unipile":
+        return JSONResponse({"error": APIFY_MISSING}, status_code=400)
+
+    sender = await store.sender_secrets(req.senderId, user["id"])
+    if not sender:
+        return JSONResponse({"error": "Add a LinkedIn sender account in Settings first"}, status_code=400)
+    if sender.get("provider") != "unipile" and not sender.get("li_at"):
+        return JSONResponse(
+            {"error": "This sender has no usable cookie — open Settings and paste the li_at cookie again"},
+            status_code=400,
+        )
+
+    # Quota check bhejne se pehle. Counters ko aaj/is hafte par le aata hai.
+    quota = await store.roll_quota(sender["id"]) or sender
+    daily_left = max(0, (quota.get("dailyCap") or config.DAILY_INVITE_CAP) - (quota.get("sentToday") or 0))
+    weekly_left = max(0, (quota.get("weeklyCap") or config.WEEKLY_INVITE_CAP) - (quota.get("sentThisWeek") or 0))
+    allowance = min(daily_left, weekly_left)
+
+    if allowance <= 0:
+        return JSONResponse(
+            {"error": f"Invite limit reached for this account ({quota.get('sentToday')} today, "
+                      f"{quota.get('sentThisWeek')} this week). Try again tomorrow."},
+            status_code=429,
+        )
+
+    return StreamingResponse(
+        _connect_stream(req, sender, allowance, user, keys),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _connect_stream(req: SendRequest, sender: dict, allowance: int,
+                          user: dict, keys: dict) -> AsyncIterator[str]:
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def send(event: dict) -> None:
+        await queue.put(event)
+
+    async def pipeline() -> None:
+        sent_count = 0
+        try:
+            contacts = await store.contacts_by_ids(req.contactIds, user["id"])
+            by_id = {c["id"]: c for c in contacts}
+
+            # Jinko pehle bheja ja chuka unhe chup-chaap chhod dete hain —
+            # dobara invite bhejna LinkedIn par sabse tez restriction laata hai.
+            done = await store.already_requested(req.contactIds, user["id"])
+
+            targets: list[dict] = []
+            for contact_id in req.contactIds:
+                contact = by_id.get(contact_id)
+                if not contact:
+                    continue
+                if contact_id in done:
+                    await send({"type": "skipped", "contactId": contact_id,
+                                "name": contact["fullName"], "reason": "Already invited"})
+                    continue
+                targets.append({
+                    "contactId": contact_id,
+                    "profileUrl": contact["profileUrl"],
+                    "fullName": contact["fullName"],
+                    "note": req.notes.get(str(contact_id)) or "",
+                })
+
+            # Quota se zyada select ho gaya ho to baaki agle din ke liye chhod do.
+            if len(targets) > allowance:
+                for extra in targets[allowance:]:
+                    await send({"type": "skipped", "contactId": extra["contactId"],
+                                "name": extra["fullName"],
+                                "reason": f"Daily/weekly limit — only {allowance} left on this account"})
+                targets = targets[:allowance]
+
+            if not targets:
+                await send({"type": "done", "sent": 0, "failed": 0, "results": []})
+                return
+
+            await send({"type": "start", "count": len(targets),
+                        "noteLimit": connect.note_limit(bool(sender.get("isPremium")))})
+
+            async def progress(**event) -> None:
+                await send(event)
+
+            results = await connect.send_batch(
+                targets=targets, sender=sender, apify_token=keys["apify"], on_progress=progress
+            )
+
+            sent_count = sum(1 for r in results if r["status"] == "sent")
+
+            for result in results:
+                try:
+                    await store.record_request(
+                        contact_id=result["contactId"],
+                        sender_id=sender["id"],
+                        provider=sender.get("provider") or config.CONNECT_PROVIDER,
+                        note=result.get("note") or "",
+                        status=result["status"],
+                        error=result.get("error"),
+                        run_url=result.get("runUrl"),
+                    )
+                except Exception as err:
+                    log.warning("request row could not be saved: %s", err)
+
+            # Counter sirf sach me gaye invites par badhta hai.
+            await store.bump_sent(sender["id"], sent_count)
+
+            await send({
+                "type": "done",
+                "sent": sent_count,
+                "failed": len(results) - sent_count,
+                "results": results,
+            })
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            log.exception("connect batch failed")
+            await send({"type": "error", "message": str(err)})
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(pipeline())
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield json.dumps(event, default=str) + "\n"
+    finally:
+        # Tab band ho gaya — beech ka invite loop rok do. Jo ja chuke wo ja chuke.
+        if not task.done():
+            task.cancel()
 
 
 # Frontend sabse aakhir me mount hota hai taaki /api/* routes pehle match hon.
 app.mount("/", StaticFiles(directory=str(config.PUBLIC_DIR), html=True), name="static")
 
-# Password set ho to poori app (API + frontend) uske peeche chali jaati hai.
-if config.APP_PASSWORD:
-    app.add_middleware(BasicAuth, username=config.APP_USERNAME, password=config.APP_PASSWORD)
-    log.info("password gate on (user: %s)", config.APP_USERNAME)
-else:
-    log.warning("APP_PASSWORD not set — app is open to anyone who has the URL")
+# Purana APP_PASSWORD wala Basic-auth gate hat gaya — ab har banda apna
+# account banata hai (app/users.py) aur apni keys laata hai. Frontend bina
+# login ke bhi serve hota hai, warna login screen hi na dikhti; asli darwaza
+# har /api route par `Depends(current_user)` hai.
+if not crypto.ready():
+    log.warning("APP_SECRET_KEY not set — users will not be able to save API keys or cookies")
