@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Literal
 
@@ -10,7 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, connect, crypto, db, docs, outreach, store, users
+from . import config, connect, crypto, db, docs, mailer, outreach, store, users
 from . import people as people_mod
 from .apify import scrape_jobs
 from .llm import MODEL_ID, build_learning_plan, draft_outreach, extract_search_params, score_jobs
@@ -37,6 +38,11 @@ async def lifespan(_: FastAPI):
         gone = await users.purge_expired_sessions()
         if gone:
             log.info("%s expired session(s) removed", gone)
+        dead_links = await users.purge_expired_resets()
+        if dead_links:
+            log.info("%s used/expired password reset link(s) removed", dead_links)
+        if not mailer.configured():
+            log.warning("SMTP not configured — password reset links will only appear in this log")
         log.info("database ready (schema: %s)", config.DB_SCHEMA)
     yield
     await db.close()
@@ -103,6 +109,15 @@ class PasswordRequest(BaseModel):
     new: str = ""
 
 
+class ForgotRequest(BaseModel):
+    email: str = ""
+
+
+class ResetRequest(BaseModel):
+    token: str = ""
+    password: str = ""
+
+
 class KeysRequest(BaseModel):
     # None = jaisi hai waisi rehne do. "" = hata do.
     apify: str | None = None
@@ -149,7 +164,9 @@ async def signup(req: SignupRequest, request: Request) -> JSONResponse:
     try:
         user = await users.create_user(req.email, req.password, req.name)
     except users.AuthError as err:
-        return JSONResponse({"error": str(err)}, status_code=400)
+        # code frontend ke liye — "email pehle se hai" par wo alag callout aur
+        # "Sign in instead" button dikhata hai.
+        return JSONResponse({"error": str(err), "code": err.code}, status_code=400)
     except Exception as err:
         log.exception("signup failed")
         return JSONResponse({"error": f"Could not create the account: {err}"}, status_code=500)
@@ -198,6 +215,86 @@ async def update_password(req: PasswordRequest, user: dict = Depends(current_use
         return JSONResponse({"error": str(err)}, status_code=400)
     # Sab sessions gir chuke — apni cookie bhi saaf kar dete hain.
     res = JSONResponse({"ok": True, "message": "Password changed — sign in again"})
+    res.delete_cookie(users.SESSION_COOKIE, path="/")
+    return res
+
+
+# ── forgot password ──────────────────────────────────────────────
+# Teen baatein poore flow me chalti hain:
+#   1. Jawab hamesha ek jaisa — "agar account hai to link bhej diya". Warna ye
+#      route email checker ban jaata: 200 matlab registered, 404 matlab nahi.
+#   2. Raw token sirf email me jaata hai, response me kabhi nahi. SMTP set na
+#      ho to link server log me milta hai — browser me dikhana matlab koi bhi
+#      kisi ka bhi password badal le.
+#   3. Ek email par har RESET_COOLDOWN_SECONDS me ek hi mail, taaki koi kisi
+#      ke inbox par button daba ke 500 mails na girwa de.
+
+RESET_OK = "If that email has an account, a reset link is on its way. Check your inbox and spam."
+RESET_COOLDOWN_SECONDS = 60
+_reset_sent_at: dict[str, float] = {}
+
+
+def _reset_throttled(email: str) -> bool:
+    now = time.monotonic()
+    last = _reset_sent_at.get(email)
+    if last is not None and now - last < RESET_COOLDOWN_SECONDS:
+        return True
+    _reset_sent_at[email] = now
+    # Dictionary ko chhota rakho — ye process ki memory me hai, DB me nahi.
+    if len(_reset_sent_at) > 500:
+        for stale in [k for k, t in _reset_sent_at.items() if now - t > RESET_COOLDOWN_SECONDS]:
+            _reset_sent_at.pop(stale, None)
+    return False
+
+
+@app.post("/api/auth/forgot")
+async def forgot_password(req: ForgotRequest, request: Request) -> JSONResponse:
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected — password reset is unavailable"}, status_code=503)
+
+    email = (req.email or "").strip().lower()
+    if not email:
+        return JSONResponse({"error": "Enter your email address"}, status_code=400)
+
+    if _reset_throttled(email):
+        log.info("reset request for %s throttled", email)
+        return JSONResponse({"ok": True, "message": RESET_OK})
+
+    made = await users.create_reset_token(email, request.client.host if request.client else None)
+    if made:
+        user, token = made
+        link = f"{config.APP_BASE_URL}/?reset={token}"
+        await mailer.send_password_reset(user["email"], user["name"], link)
+
+    # Email mile ya na mile, jawab wahi. Bhejne me dikkat aayi to bhi wahi —
+    # mailer ne link log me likh diya hai.
+    return JSONResponse({"ok": True, "message": RESET_OK, "emailConfigured": mailer.configured()})
+
+
+@app.get("/api/auth/reset")
+async def check_reset(token: str = "") -> JSONResponse:
+    """Reset form dikhane se pehle frontend link ko yahan verify karta hai."""
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected"}, status_code=503)
+    try:
+        info = await users.check_reset_token(token)
+    except users.AuthError as err:
+        return JSONResponse({"error": str(err)}, status_code=400)
+    return JSONResponse({"ok": True, **info})
+
+
+@app.post("/api/auth/reset")
+async def do_reset(req: ResetRequest) -> JSONResponse:
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected"}, status_code=503)
+    try:
+        done = await users.reset_password(req.token, req.password)
+    except users.AuthError as err:
+        return JSONResponse({"error": str(err)}, status_code=400)
+
+    # Jaan-boojh kar login nahi karate — naya password ek baar type karwana
+    # hi confirm karta hai ki wo yaad hai.
+    res = JSONResponse({"ok": True, "email": done["email"], "message": "Password changed — sign in with it now"})
     res.delete_cookie(users.SESSION_COOKIE, path="/")
     return res
 

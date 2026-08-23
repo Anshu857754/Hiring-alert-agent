@@ -38,6 +38,13 @@ APP_SECRET_KEY=        # users ki keys + LinkedIn cookie isse encrypt hoti hain
 COOKIE_SECURE=0             # https deploy par 1 kar do
 FOUNDER_MAX_EMPLOYEES=50    # optional — isse chhoti company me founder/CTO, badi me HR
 CONNECT_PROVIDER=apify      # optional — apify ya unipile
+
+# Forgot password ke liye (dekho *Forgot password* section)
+APP_BASE_URL=http://localhost:10000
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=tumhara@gmail.com
+SMTP_PASS=                  # Gmail ka **app password**, normal password nahi
 ```
 
 `APP_SECRET_KEY` koi bhi lambi random string ho sakti hai:
@@ -138,6 +145,57 @@ warna tumhari history kisi aur ke paas chali jaayegi.
 
 ---
 
+## Forgot password
+
+Password scrypt se hashed hai — recover karne ka koi raasta hai hi nahi, sirf
+reset. Login screen par **Forgot password?** se flow shuru hota hai.
+
+```
+email daalo  →  POST /api/auth/forgot  →  token banta hai (32 random bytes)
+             →  email me link:  {APP_BASE_URL}/?reset=<token>
+link kholo   →  GET  /api/auth/reset?token=…   (valid hai ya nahi)
+naya password→  POST /api/auth/reset            (token jal jaata hai)
+```
+
+**Teen cheezein jaan-boojh kar aisi hain:**
+
+| Kya | Kyun |
+|---|---|
+| DB me token ka **sha256** hai, raw token nahi | DB dump leak ho jaaye to bhi koi link banake kisi ka account nahi khol sakta — wahi soch jo password hashing ke peeche hai |
+| Jawab hamesha `"If that email has an account…"` | Warna ye route email checker ban jaata: 200 matlab registered, 404 matlab nahi |
+| Link response me kabhi nahi, sirf email me | Browser me dikha dete to koi bhi ajnabi kisi ka bhi email daal ke uska password badal leta |
+
+Uske alawa: token **30 minute** chalta hai (`RESET_TOKEN_MINUTES`), **ek hi
+baar** chalta hai, naya request purane token maar deta hai, aur reset hote hi
+us user ke **saare sessions** delete ho jaate hain. Ek email par har 60 second
+me ek hi mail jaati hai — warna koi kisi ke inbox par button daba ke 500 mails
+girwa deta. Purane/expired rows startup par saaf ho jaate hain.
+
+**SMTP setup (Gmail)**
+
+1. Google account par 2FA on karo
+2. [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) se 16-character app password banao — tumhara **normal Gmail password kaam nahi karega**
+3. `.env` me daalo:
+
+```
+APP_BASE_URL=https://tumhara-app.onrender.com   # deploy par asli URL, warna email me localhost jaayega
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=tumhara@gmail.com
+SMTP_PASS=abcd efgh ijkl mnop
+SMTP_FROM=tumhara@gmail.com
+SMTP_FROM_NAME=RAYN.AI
+```
+
+Port 465 use karna ho to `SMTP_SSL=1` — 587 par STARTTLS apne aap lagta hai.
+
+**SMTP set na ho to?** App phir bhi chalti hai. Reset link server ke log me
+print hota hai (`WARNING … password reset link for x@y.com: …`) aur user ko
+wahi generic message dikhta hai. UI bhi bata deta hai ki mail nahi nikli.
+Matlab admin manually link bhej sakta hai, par email ke bina ye feature
+end-users ke liye adhoora hai — deploy se pehle SMTP zaroor bhar do.
+
+
 ## Files
 
 | File | Kaam |
@@ -154,7 +212,8 @@ warna tumhari history kisi aur ke paas chali jaayegi.
 | `app/db.py` | Postgres connection pool + migration runner (`migrations/*.sql`) |
 | `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, outreach, contacts, senders, stats |
 | `app/config.py` | `.env` load, limits, allowed file types, `DATABASE_URL`, `APP_PASSWORD` |
-| `app/users.py` | Accounts, scrypt passwords, server-side sessions, per-user API keys |
+| `app/users.py` | Accounts, scrypt passwords, server-side sessions, per-user API keys, reset tokens |
+| `app/mailer.py` | SMTP se email (abhi sirf password reset). SMTP na ho to link server log me |
 | `migrate.py` | Migrations alag se chalane ka CLI |
 | `migrations/*.sql` | Schema. File ka number hi version hai (`0001_init.sql` → 1) |
 | `public/index.html` | **Poora frontend** — React app (single-file), Tailwind theme, JD attach bar, NDJSON stream, table sort/filter/CSV |
@@ -188,6 +247,9 @@ warna tumhari history kisi aur ke paas chali jaayegi.
 | `POST /api/auth/logout` | Session row delete — token sach me mar jaata hai |
 | `GET /api/auth/me` | `{ user }` ya `{ user: null }`. Frontend boot par yahi poochta hai |
 | `POST /api/auth/password` | `{ current, new }` → password badlo (baaki sab sessions gir jaate hain) |
+| `POST /api/auth/forgot` | `{ email }` → reset link email par. Jawab hamesha ek jaisa, chahe email registered ho ya na ho |
+| `GET /api/auth/reset?token=` | Link valid hai ya nahi — form dikhane se pehle frontend yahi poochta hai |
+| `POST /api/auth/reset` | `{ token, password }` → naya password. Token ek hi baar chalta hai, saare sessions gir jaate hain |
 | `POST /api/auth/keys` | `{ apify?, openRouter? }` → apni keys save karo (sealed). `null` = mat chhedo, `""` = hata do |
 | `GET /api/senders` | Sender accounts + `secretReady`. **Cookie kabhi wapas nahi aati** — sirf `hasCookie` |
 | `POST /api/senders` | `{ id?, label, liAt, jsessionid?, isPremium }` → cookie encrypt ho kar save. `liAt` khaali = purani cookie waise hi rehti hai |
@@ -277,8 +339,12 @@ Render par **New → Web Service**, repo connect karo, phir:
 | Build Command | `pip install -r requirements.txt` |
 | Start Command | `python run.py` |
 
-Environment variables: `APIFY_API_KEY`, `OPENROUTER_API_KEY`, `DATABASE_URL`
-(Neon ka **pooled** `-pooler` wala URL), aur `APP_PASSWORD`.
+Environment variables: `DATABASE_URL` (Neon ka **pooled** `-pooler` wala URL),
+`APP_SECRET_KEY`, aur `COOKIE_SECURE=1`. API keys ab per-user hain, isliye
+server par `APIFY_API_KEY`/`OPENROUTER_API_KEY` ki zaroorat nahi.
+
+Forgot password chahiye to `APP_BASE_URL` (asli https URL) + `SMTP_*` bhi
+set karo — dekho *Forgot password* section.
 
 Do cheezein jaan-boojh kar aise hain:
 
