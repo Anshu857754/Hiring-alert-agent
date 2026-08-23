@@ -5,3 +5,6 @@ __pycache__/
 node_modules/
 jobs-*.json
 jobs-*.csv
+
+# Ek account ka nikaala hua data — personal hai, repo me nahi jaana chahiye.
+export/

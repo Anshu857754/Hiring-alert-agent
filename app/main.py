@@ -41,9 +41,21 @@ async def lifespan(_: FastAPI):
         dead_links = await users.purge_expired_resets()
         if dead_links:
             log.info("%s used/expired password reset link(s) removed", dead_links)
-        if not mailer.configured():
-            log.warning("SMTP not configured — password reset links will only appear in this log")
         log.info("database ready (schema: %s)", config.DB_SCHEMA)
+
+    # Ek hi jagah: kya-kya set nahi hai aur uska kya asar padega. Host par
+    # deploy karke "kaam kyun nahi kar raha" dhoondhne se behtar hai.
+    missing = []
+    if not crypto.ready():
+        missing.append("APP_SECRET_KEY — users API keys/cookies save NAHI kar payenge")
+    if not mailer.configured():
+        missing.append("SMTP_* — password reset link sirf is log me aayega, email nahi jaayegi")
+    if not config.COOKIE_SECURE:
+        missing.append("COOKIE_SECURE=1 — https deploy par set karo")
+    if missing:
+        log.warning("missing config (%s):", len(missing))
+        for item in missing:
+            log.warning("  - %s", item)
     yield
     await db.close()
 
@@ -324,6 +336,15 @@ async def health() -> dict:
         # cookie/keys encrypt karne ka intezaam hai ya nahi.
         "secretReady": crypto.ready(),
         "db": db.status(),
+        # Deploy debug karne ke liye. Sirf "set hai ya nahi" — koi value yahan
+        # se bahar nahi jaati. Iske bina har baar guess karna padta tha ki
+        # host par kaunsi variable reh gayi.
+        "env": {
+            "APP_SECRET_KEY": crypto.ready(),
+            "SMTP": mailer.configured(),
+            "APP_BASE_URL": config.APP_BASE_URL,
+            "COOKIE_SECURE": config.COOKIE_SECURE,
+        },
     }
 
 

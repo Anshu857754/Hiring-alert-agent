@@ -2790,8 +2790,13 @@ function ApiKeysCard({ user, secretReady, busy, onSave }) {
         <div className="space-y-4 border-b border-line-subtle bg-surface-sunken px-5 py-4">
           {!secretReady && (
             <InlineStatus type="error">
-              APP_SECRET_KEY is not set on the server, so keys cannot be encrypted — and they will not be stored
-              in plain text. Ask the admin to set it before saving.
+              <span className="font-semibold">APP_SECRET_KEY is not set on the server</span>, so your keys cannot be
+              encrypted — and they will not be stored in plain text. That is why Save is disabled.
+              Set it where this server runs (on Render: <b className="font-semibold">Environment</b> → add
+              <code className="mx-1 rounded bg-surface-sunken px-1">APP_SECRET_KEY</code> → <b className="font-semibold">Save
+              Changes</b>; locally: <code className="mx-1 rounded bg-surface-sunken px-1">.env</code> then restart),
+              and reload this page. If several environments share one database, they must all use the
+              <b className="font-semibold"> same</b> value or previously saved keys stop opening.
             </InlineStatus>
           )}
 
@@ -3086,8 +3091,10 @@ function SenderAccountCard({ senders, secretReady, busy, onSave, onVerify, onDel
         <div className="space-y-4 border-b border-line-subtle bg-surface-sunken px-5 py-4">
           {!secretReady && (
             <InlineStatus type="error">
-              APP_SECRET_KEY is not set on the server, so the cookie cannot be encrypted — and it will not be
-              stored in plain text. Add it to .env and restart before saving.
+              <span className="font-semibold">APP_SECRET_KEY is not set on the server</span>, so the cookie cannot be
+              encrypted — and it will not be stored in plain text. Set it where this server runs (on Render:
+              <b className="font-semibold"> Environment</b> tab; locally:
+              <code className="mx-1 rounded bg-surface-sunken px-1">.env</code>), restart, then reload this page.
             </InlineStatus>
           )}
 
