@@ -57,6 +57,14 @@ SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "RAYN.AI").strip()
 # 587 par STARTTLS, 465 par seedha SSL. Default port se hi decide ho jaata hai.
 SMTP_SSL = os.getenv("SMTP_SSL", "").strip().lower() in ("1", "true", "yes") or SMTP_PORT == 465
 
+# ── public demo ────────────────────────────────────────────────────
+# LinkedIn par share karne ke liye ek read-only account. Visitor bina signup
+# ke andar aa jaata hai aur ek purana run poora ghoom kar dekh sakta hai —
+# jobs, scores, contacts, drafts. Paisa kharch karne wala koi bhi button us
+# account par band rehta hai, warna ek post ke baad Apify balance saaf.
+DEMO_EMAIL = os.getenv("DEMO_EMAIL", "demo@rayn.ai").strip().lower()
+DEMO_ENABLED = os.getenv("DEMO_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+
 # Reset link kitni der chalega. Chhota rakha hai — mail me pada link jitni
 # der zinda rahega, utni der khatra rahega.
 RESET_TOKEN_MINUTES = int(os.getenv("RESET_TOKEN_MINUTES", "30"))

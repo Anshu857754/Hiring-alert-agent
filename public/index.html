@@ -1500,7 +1500,7 @@ function PipelineConfig({ limit, setLimit, cost, sources, toggleSource, targetTi
 
 /* Sticky rehta hai content column ke andar, isliye ye sidebar ke neeche nahi
    jaata aur results scroll hone par bhi haath ke paas rehta hai. */
-function ActionDock({ profiles, cost, seconds, busy, stage, blocked, onLaunch }) {
+function ActionDock({ profiles, cost, seconds, busy, stage, blocked, demo, onLaunch }) {
   return (
     <div className="pointer-events-none sticky bottom-5 z-30 flex justify-center">
       <motion.div
@@ -1511,25 +1511,34 @@ function ActionDock({ profiles, cost, seconds, busy, stage, blocked, onLaunch })
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <Zap size={14} aria-hidden className="shrink-0 text-brand-text" />
           <span className="min-w-0 truncate text-fg-sec">
-            <span className="font-semibold tabular-nums text-fg">{profiles}</span> profiles
-            <span className="mx-1.5 text-fg-disabled">•</span>
-            est. <span className="font-semibold tabular-nums text-fg">~${cost}</span>
-            <span className="mx-1.5 text-fg-disabled">•</span>
-            <span className="tabular-nums">~{seconds}s</span>
+            {demo ? (
+              <>Read-only demo — <span className="font-semibold text-fg">sign up</span> to run this live</>
+            ) : (
+              <>
+                <span className="font-semibold tabular-nums text-fg">{profiles}</span> profiles
+                <span className="mx-1.5 text-fg-disabled">•</span>
+                est. <span className="font-semibold tabular-nums text-fg">~${cost}</span>
+                <span className="mx-1.5 text-fg-disabled">•</span>
+                <span className="tabular-nums">~{seconds}s</span>
+              </>
+            )}
           </span>
         </div>
 
         <motion.button
-          type="button" onClick={onLaunch} disabled={busy || blocked}
-          whileHover={busy || blocked ? undefined : { scale: 1.03 }}
-          whileTap={busy || blocked ? undefined : { scale: 0.97 }}
+          type="button" onClick={onLaunch} disabled={busy || blocked || demo}
+          title={demo ? 'Disabled in the demo — this run would spend real Apify credits' : undefined}
+          whileHover={busy || blocked || demo ? undefined : { scale: 1.03 }}
+          whileTap={busy || blocked || demo ? undefined : { scale: 0.97 }}
           className={`accent-grad inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full px-6 text-body font-semibold text-white transition-shadow disabled:pointer-events-none disabled:opacity-60 ${ring} ${
-            busy || blocked ? 'shadow-glow' : 'glow-pulse hover:shadow-glow-lg'
+            busy || blocked || demo ? 'shadow-glow' : 'glow-pulse hover:shadow-glow-lg'
           }`}
         >
           {busy
             ? <><Loader2 size={16} aria-hidden className="animate-spin" /> {stage}</>
-            : <><Rocket size={16} aria-hidden /> Launch RAYN Pipeline</>}
+            : demo
+              ? <><Eye size={16} aria-hidden /> Demo — read only</>
+              : <><Rocket size={16} aria-hidden /> Launch RAYN Pipeline</>}
         </motion.button>
       </motion.div>
     </div>
@@ -2458,14 +2467,15 @@ function Overview({ history, stats, go }) {
   );
 }
 
-function Searches({ history, loading, onOpen, onClear, onDelete }) {
+function Searches({ history, loading, demo, onOpen, onClear, onDelete }) {
   if (loading) return <EmptyState Icon={History} title="Loading searches…" body="Fetching your history from the database." />;
   if (!history.length) return <EmptyState Icon={History} title="No search history" body="Every search you run is stored in the database and shows up here." />;
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-line-subtle px-4 py-2.5">
         <h3 className="text-sm font-semibold text-fg">{history.length} searches</h3>
-        <Button size="sm" variant="danger" onClick={onClear}><Trash2 size={13} aria-hidden /> Clear history</Button>
+        {/* Demo sabke liye ek hi data dikhata hai — usse mitane ka button dena hi nahi chahiye. */}
+        {!demo && <Button size="sm" variant="danger" onClick={onClear}><Trash2 size={13} aria-hidden /> Clear history</Button>}
       </div>
       <ul className="divide-y divide-line-subtle">
         {history.map((h) => (
@@ -2485,6 +2495,26 @@ function Searches({ history, loading, onOpen, onClear, onDelete }) {
         ))}
       </ul>
     </Card>
+  );
+}
+
+/* Demo banner — LinkedIn se aaya banda pehli nazar me samajh jaaye ki wo kya
+   dekh raha hai aur asli cheez kaise chalani hai. */
+function DemoBanner({ onLeave }) {
+  return (
+    <div className="fade-up mb-6 flex flex-col gap-3 rounded-xl border border-info-border bg-info-subtle px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="flex items-start gap-2 text-sm text-info-text">
+        <Eye size={15} aria-hidden className="mt-px shrink-0" />
+        <span>
+          <span className="font-semibold">You are in the read-only demo.</span>{' '}
+          Everything below is a real saved run — 163 scraped jobs, LLM match scores, decision makers and
+          outreach drafts. Running a new search is disabled here because it spends real Apify credits.
+        </span>
+      </p>
+      <Button variant="primary" size="sm" className="shrink-0" onClick={onLeave}>
+        Create a free account <ArrowRight size={14} aria-hidden />
+      </Button>
+    </div>
   );
 }
 
@@ -2568,6 +2598,20 @@ function AuthScreen({ onDone, dbOffline }) {
     } catch (err) {
       setError(err.message);
       setErrorCode(err.code || '');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* Bina signup ke andar — LinkedIn se aaya banda form bharne me na atke. */
+  const openDemo = async () => {
+    clearMsgs();
+    setBusy(true);
+    try {
+      const out = await api.post('/api/auth/demo', {});
+      onDone(out.user);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setBusy(false);
     }
@@ -2708,6 +2752,24 @@ function AuthScreen({ onDone, dbOffline }) {
                   : <>{cta} <CtaIcon size={14} aria-hidden /></>}
               </Button>
             </form>
+          )}
+
+          {/* Demo sirf login/signup par — reset ya forgot ke beech me raasta nahi katna chahiye. */}
+          {(mode === 'login' || mode === 'signup') && (
+            <>
+              <div className="mt-5 flex items-center gap-3">
+                <span className="h-px flex-1 bg-line" />
+                <span className="text-xs text-fg-muted">or</span>
+                <span className="h-px flex-1 bg-line" />
+              </div>
+              <Button variant="secondary" size="lg" className="mt-4 w-full" onClick={openDemo}
+                      disabled={busy || dbOffline}>
+                <Eye size={14} aria-hidden /> Try the demo — no sign-up
+              </Button>
+              <p className="mt-2 text-center text-xs text-fg-muted">
+                Opens a real saved run: 163 scraped jobs, match scores, decision makers and outreach drafts.
+              </p>
+            </>
           )}
 
           {!deadLink && !checking && (
@@ -3201,7 +3263,7 @@ function SettingsView({ health, theme, setTheme, creditsLeft, onClearHistory,
         </SettingRow>
 
         <SettingRow Icon={Trash2} label="Clear run history" hint="Deletes every past run and its results. Saved matches stay.">
-          <Button variant="danger" onClick={onClearHistory}><Trash2 size={14} aria-hidden /> Clear history</Button>
+          {!me?.isDemo && <Button variant="danger" onClick={onClearHistory}><Trash2 size={14} aria-hidden /> Clear history</Button>}
         </SettingRow>
 
         <SettingRow Icon={KeyRound} label="Sign out" hint={`Signed in as ${me?.email || 'this account'}.`}>
@@ -3952,6 +4014,8 @@ function App() {
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-[1280px] px-4 pt-6 pb-36 sm:px-6 sm:pt-8">
 
+            {me?.isDemo && <DemoBanner onLeave={logout} />}
+
             <div className="mb-6">
               <h1 className="text-display font-bold tracking-tight text-fg">{pageTitle}</h1>
               <p className="mt-1.5 max-w-2xl text-body text-fg-sec">{pageSub}</p>
@@ -3975,7 +4039,7 @@ function App() {
                 />
 
                 <ActionDock profiles={profiles} cost={cost} seconds={seconds} busy={busy} stage={stage}
-                            blocked={sources.length === 0} onLaunch={run} />
+                            blocked={sources.length === 0} demo={!!me?.isDemo} onLaunch={run} />
 
                 <section ref={pipelineRef} aria-labelledby="pipe-head" className="scroll-mt-6">
                   <SectionHead title={<span id="pipe-head">Candidate pipeline</span>}
@@ -3988,8 +4052,8 @@ function App() {
             )}
 
             {view === 'overview' && <Overview history={history} stats={stats} go={setView} />}
-            {view === 'searches' && <Searches history={history} loading={historyLoading} onOpen={openHistory}
-                                              onClear={clearHistory} onDelete={deleteSearch} />}
+            {view === 'searches' && <Searches history={history} loading={historyLoading} demo={!!me?.isDemo}
+                                              onOpen={openHistory} onClear={clearHistory} onDelete={deleteSearch} />}
             {view === 'matches' && (
               <Pipeline jobs={jobs} skills={skills} busy={busy} stage={stage}
                         savedKeys={savedKeys} onSave={toggleSave} onExport={() => exportCsv(jobs)}
