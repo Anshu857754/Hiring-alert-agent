@@ -98,6 +98,9 @@ def _user_out(row: dict) -> dict:
         "createdAt": created.isoformat() if created else None,
         "hasApifyKey": bool(row.get("apify_key_enc")),
         "hasOpenRouterKey": bool(row.get("openrouter_key_enc")),
+        # Frontend isse demo banner dikhata hai aur run wale buttons band
+        # rakhta hai. Asli rok server par hai (main.py -> writable_user).
+        "isDemo": (row.get("email") or "").lower() == config.DEMO_EMAIL,
     }
 
 
@@ -180,6 +183,38 @@ async def change_password(user_id: int, current: str, new: str) -> None:
     )
     # Password badla to baaki devices ke sessions gir jaane chahiye.
     await db.execute(f"DELETE FROM {S}sessions WHERE user_id = %s", (user_id,))
+
+
+# ─────────────────────────── public demo ───────────────────────────
+
+
+async def ensure_demo_user() -> dict | None:
+    """Demo account laao; na ho to bana do.
+
+    Password random rakha jaata hai aur kahin likha nahi jaata — is account me
+    ghusne ka ek hi raasta hai, `POST /api/auth/demo`. Yaani login form se
+    koi ise brute force nahi kar sakta.
+    """
+    if not config.DEMO_ENABLED:
+        return None
+
+    row = await db.fetch_one(
+        f"SELECT * FROM {S}users WHERE lower(email) = %s", (config.DEMO_EMAIL,)
+    )
+    if row:
+        return _user_out(row)
+
+    password_hash, salt = hash_password(secrets.token_urlsafe(32))
+    row = await db.fetch_one(
+        f"""
+        INSERT INTO {S}users (email, name, password_hash, password_salt)
+        VALUES (%s, %s, %s, %s)
+     RETURNING *
+        """,
+        (config.DEMO_EMAIL, "Demo", password_hash, salt),
+    )
+    log.info("demo account created: %s", config.DEMO_EMAIL)
+    return _user_out(row) if row else None
 
 
 # ─────────────────────────── password reset ───────────────────────────

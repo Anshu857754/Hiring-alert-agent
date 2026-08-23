@@ -169,6 +169,24 @@ async def user_keys(user: dict) -> dict:
     return await users.get_keys(user["id"])
 
 
+DEMO_READ_ONLY = (
+    "This is the public demo, so it stays read-only — the saved run is the same for everyone. "
+    "Create a free account and add your own Apify and OpenRouter keys to run this for real."
+)
+
+
+async def writable_user(user: dict = Depends(current_user)) -> dict:
+    """Har wo route jo paisa kharch kare ya data badle, isse hoke jaata hai.
+
+    Demo account ko yahin rok dete hain — frontend par buttons disable karna
+    kaafi nahi hai, koi bhi seedha API hit kar ke Apify credits jala sakta
+    tha, ya sabke liye rakha demo data delete kar sakta tha.
+    """
+    if user.get("isDemo"):
+        raise HTTPException(status_code=403, detail=DEMO_READ_ONLY)
+    return user
+
+
 @app.post("/api/auth/signup")
 async def signup(req: SignupRequest, request: Request) -> JSONResponse:
     if not db.enabled():
@@ -200,6 +218,27 @@ async def login(req: LoginRequest, request: Request) -> JSONResponse:
     return _session_response({"ok": True, "user": user}, token, expires)
 
 
+@app.post("/api/auth/demo")
+async def demo_login(request: Request) -> JSONResponse:
+    """Bina signup ke demo account me ghusao — LinkedIn se aaya banda seedha
+    andar dekhe, form bharne me na atke.
+
+    Account read-only hai: har paisa kharch karne wala aur har delete wala
+    route `writable_user` par 403 deta hai.
+    """
+    if not config.DEMO_ENABLED:
+        return JSONResponse({"error": "The demo is turned off on this server"}, status_code=404)
+    if not db.enabled():
+        return JSONResponse({"error": "Database is not connected — the demo is unavailable"}, status_code=503)
+
+    user = await users.ensure_demo_user()
+    if not user:
+        return JSONResponse({"error": "Could not open the demo account"}, status_code=500)
+
+    token, expires = await users.start_session(user["id"], request.headers.get("user-agent"))
+    return _session_response({"ok": True, "user": user}, token, expires)
+
+
 @app.post("/api/auth/logout")
 async def logout(request: Request) -> JSONResponse:
     await users.end_session(request.cookies.get(users.SESSION_COOKIE))
@@ -220,7 +259,7 @@ async def whoami(request: Request) -> JSONResponse:
 
 
 @app.post("/api/auth/password")
-async def update_password(req: PasswordRequest, user: dict = Depends(current_user)) -> JSONResponse:
+async def update_password(req: PasswordRequest, user: dict = Depends(writable_user)) -> JSONResponse:
     try:
         await users.change_password(user["id"], req.current, req.new)
     except users.AuthError as err:
@@ -312,7 +351,7 @@ async def do_reset(req: ResetRequest) -> JSONResponse:
 
 
 @app.post("/api/auth/keys")
-async def save_api_keys(req: KeysRequest, user: dict = Depends(current_user)) -> JSONResponse:
+async def save_api_keys(req: KeysRequest, user: dict = Depends(writable_user)) -> JSONResponse:
     if (req.apify or req.openRouter) and not crypto.ready():
         return JSONResponse(
             {"error": "APP_SECRET_KEY is not set on the server, so API keys cannot be encrypted. "
@@ -344,6 +383,7 @@ async def health() -> dict:
             "SMTP": mailer.configured(),
             "APP_BASE_URL": config.APP_BASE_URL,
             "COOKIE_SECURE": config.COOKIE_SECURE,
+            "DEMO": config.DEMO_ENABLED,
         },
     }
 
@@ -376,7 +416,7 @@ async def extract(file: UploadFile = File(...), user: dict = Depends(current_use
 
 
 @app.post("/api/recommend")
-async def recommend(req: RecommendRequest, user: dict = Depends(current_user)) -> JSONResponse:
+async def recommend(req: RecommendRequest, user: dict = Depends(writable_user)) -> JSONResponse:
     """Scored postings ke gaps se 15/30 din ka upskilling plan banata hai."""
     profile = (req.profile or "").strip()
 
@@ -411,7 +451,7 @@ async def recommend(req: RecommendRequest, user: dict = Depends(current_user)) -
 
 
 @app.post("/api/search")
-async def search(req: SearchRequest, user: dict = Depends(current_user)):
+async def search(req: SearchRequest, user: dict = Depends(writable_user)):
     job_description = (req.jobDescription or "").strip()
 
     if len(job_description) < 20:
@@ -570,7 +610,7 @@ def _background(coro) -> None:
 # ─────────────────────────── reach out ───────────────────────────
 
 @app.post("/api/outreach")
-async def outreach_draft(req: OutreachRequest, user: dict = Depends(current_user)) -> JSONResponse:
+async def outreach_draft(req: OutreachRequest, user: dict = Depends(writable_user)) -> JSONResponse:
     """Ek posting ke liye reach-out draft — chhoti company me founder, badi me HR."""
     profile = (req.profile or "").strip()
 
@@ -633,7 +673,7 @@ async def get_search(search_id: int, user: dict = Depends(current_user)) -> JSON
 
 
 @app.delete("/api/searches/{search_id}")
-async def delete_search(search_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+async def delete_search(search_id: int, user: dict = Depends(writable_user)) -> JSONResponse:
     deleted = await store.delete_search(search_id, user["id"])
     if not deleted:
         return JSONResponse({"error": "Search not found"}, status_code=404)
@@ -641,7 +681,7 @@ async def delete_search(search_id: int, user: dict = Depends(current_user)) -> J
 
 
 @app.delete("/api/searches")
-async def clear_searches(user: dict = Depends(current_user)) -> JSONResponse:
+async def clear_searches(user: dict = Depends(writable_user)) -> JSONResponse:
     return JSONResponse({"ok": True, "deleted": await store.clear_searches(user["id"])})
 
 
@@ -653,7 +693,7 @@ async def list_saved(user: dict = Depends(current_user)) -> JSONResponse:
 
 
 @app.post("/api/saved")
-async def add_saved(req: SaveRequest, user: dict = Depends(current_user)) -> JSONResponse:
+async def add_saved(req: SaveRequest, user: dict = Depends(writable_user)) -> JSONResponse:
     if not req.job:
         return JSONResponse({"error": "No job supplied"}, status_code=400)
     if not db.enabled():
@@ -671,7 +711,7 @@ async def add_saved(req: SaveRequest, user: dict = Depends(current_user)) -> JSO
 
 
 @app.delete("/api/saved")
-async def remove_saved(key: str, user: dict = Depends(current_user)) -> JSONResponse:
+async def remove_saved(key: str, user: dict = Depends(writable_user)) -> JSONResponse:
     return JSONResponse({"ok": True, "deleted": await store.remove_saved(key, user["id"])})
 
 
@@ -685,7 +725,7 @@ async def stats(user: dict = Depends(current_user)) -> JSONResponse:
 
 
 @app.post("/api/import")
-async def import_legacy(req: ImportRequest, user: dict = Depends(current_user)) -> JSONResponse:
+async def import_legacy(req: ImportRequest, user: dict = Depends(writable_user)) -> JSONResponse:
     """Browser me pade purane searches/saved jobs ko ek baar DB me le aata hai."""
     if not db.enabled():
         return JSONResponse({"error": "Database is not connected"}, status_code=503)
@@ -738,7 +778,7 @@ async def list_senders(user: dict = Depends(current_user)) -> JSONResponse:
 
 
 @app.post("/api/senders")
-async def save_sender(req: SenderRequest, user: dict = Depends(current_user)) -> JSONResponse:
+async def save_sender(req: SenderRequest, user: dict = Depends(writable_user)) -> JSONResponse:
     if not db.enabled():
         return JSONResponse({"error": "Database is not connected — the sender account cannot be stored"}, status_code=503)
 
@@ -778,7 +818,7 @@ async def save_sender(req: SenderRequest, user: dict = Depends(current_user)) ->
 
 
 @app.post("/api/senders/{sender_id}/verify")
-async def verify_sender(sender_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+async def verify_sender(sender_id: int, user: dict = Depends(writable_user)) -> JSONResponse:
     """Ek GET se dekhta hai ki cookie zinda hai — koi invite nahi jaata."""
     secrets_row = await store.sender_secrets(sender_id, user["id"])
     if not secrets_row:
@@ -799,13 +839,13 @@ async def verify_sender(sender_id: int, user: dict = Depends(current_user)) -> J
 
 
 @app.post("/api/senders/{sender_id}/default")
-async def make_default_sender(sender_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+async def make_default_sender(sender_id: int, user: dict = Depends(writable_user)) -> JSONResponse:
     await store.set_default_sender(sender_id, user["id"])
     return JSONResponse({"ok": True, "senders": await store.list_senders(user["id"])})
 
 
 @app.delete("/api/senders/{sender_id}")
-async def remove_sender(sender_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+async def remove_sender(sender_id: int, user: dict = Depends(writable_user)) -> JSONResponse:
     deleted = await store.delete_sender(sender_id, user["id"])
     if not deleted:
         return JSONResponse({"error": "Sender account not found"}, status_code=404)
@@ -825,7 +865,7 @@ async def list_contacts(jobKey: str | None = None, limit: int = 200,
 
 
 @app.post("/api/contacts/discover")
-async def discover_contacts(req: DiscoverRequest, user: dict = Depends(current_user)) -> JSONResponse:
+async def discover_contacts(req: DiscoverRequest, user: dict = Depends(writable_user)) -> JSONResponse:
     """Ek company ke decision makers Apify se — cookie ki zaroorat nahi."""
     company = (req.job.get("company") or "").strip()
 
@@ -874,14 +914,14 @@ async def discover_contacts(req: DiscoverRequest, user: dict = Depends(current_u
 
 
 @app.delete("/api/contacts/{contact_id}")
-async def remove_contact(contact_id: int, user: dict = Depends(current_user)) -> JSONResponse:
+async def remove_contact(contact_id: int, user: dict = Depends(writable_user)) -> JSONResponse:
     return JSONResponse({"ok": True, "deleted": await store.delete_contact(contact_id, user["id"])})
 
 
 # ─────────────────────────── connection requests ───────────────────────────
 
 @app.post("/api/connect/send")
-async def send_connections(req: SendRequest, user: dict = Depends(current_user)):
+async def send_connections(req: SendRequest, user: dict = Depends(writable_user)):
     """Chune hue logon ko connection request + note.
 
     Stream isliye hai ki har invite ke beech ~25s ka gap hai: 7 log matlab

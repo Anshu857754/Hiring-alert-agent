@@ -195,6 +195,53 @@ wahi generic message dikhta hai. UI bhi bata deta hai ki mail nahi nikli.
 Matlab admin manually link bhej sakta hai, par email ke bina ye feature
 end-users ke liye adhoora hai — deploy se pehle SMTP zaroor bhar do.
 
+---
+
+## Public demo
+
+LinkedIn par link share karna ho to problem ye thi: har visitor se apni Apify
+aur OpenRouter key maangi jaati hai. Recruiter ke paas Apify account hota nahi
+— wo Settings dekh kar chala jaata.
+
+Ab login screen par **"Try the demo — no sign-up"** hai. Ek click me banda
+`demo@rayn.ai` account me chala jaata hai jahan ek asli purana run pada hai:
+163 scraped jobs, match scores, 6 decision makers, 8 outreach drafts, 2
+learning plans.
+
+**Read-only kaise banaya:** frontend par button disable karna kaafi nahi tha —
+koi bhi seedha API hit kar ke Apify credits jala sakta tha, ya sabke liye rakha
+demo data delete kar sakta tha. Isliye asli rok server par hai. Jo bhi route
+paisa kharch karta hai ya data badalta hai, wo ab `writable_user` dependency se
+hoke jaata hai (`app/main.py`), aur demo account ko wahin 403 mil jaata hai:
+
+| Band (403) | Khula (200) |
+|---|---|
+| `POST /api/search`, `/api/recommend`, `/api/outreach` | saare `GET` — searches, jobs, contacts, outreach, stats |
+| `POST /api/contacts/discover`, `/api/connect/send` | `POST /api/extract` (PDF parse — local hai, free hai) |
+| `POST /api/auth/keys`, `/api/auth/password`, `/api/senders` | |
+| saare `DELETE` | |
+
+UI me bhi: demo banner upar, Launch button "Demo — read only" (disabled), aur
+"Clear history" gayab.
+
+**Demo me data bharna:**
+
+```bash
+python seed_demo.py anshu.singh8595508@gmail.com
+```
+
+Jis account se copy karna hai wo argument me. Har baar chalane par demo ka
+purana data hata kar naya bharta hai, to baar-baar chalana safe hai. Sender
+account copy nahi hota — usme sealed LinkedIn cookie hoti hai.
+
+`DEMO_ENABLED=0` se demo band ho jaata hai, `DEMO_EMAIL` se account ka email
+badal sakte ho.
+
+**Demo ko koi env var nahi chahiye** — `APP_SECRET_KEY` na bhi ho to chalta
+hai, kyunki demo me koi key encrypt hoti hi nahi. Jo banda apni keys daal kar
+live chalana chahe, uske liye `APP_SECRET_KEY` zaroori hai.
+
+---
 
 ## Files
 
@@ -214,6 +261,7 @@ end-users ke liye adhoora hai — deploy se pehle SMTP zaroor bhar do.
 | `app/config.py` | `.env` load, limits, allowed file types, `DATABASE_URL`, `APP_PASSWORD` |
 | `app/users.py` | Accounts, scrypt passwords, server-side sessions, per-user API keys, reset tokens |
 | `app/mailer.py` | SMTP se email (abhi sirf password reset). SMTP na ho to link server log me |
+| `seed_demo.py` | Demo account me showcase data bharta hai (ek asli run ki copy) |
 | `migrate.py` | Migrations alag se chalane ka CLI |
 | `migrations/*.sql` | Schema. File ka number hi version hai (`0001_init.sql` → 1) |
 | `public/index.html` | **Poora frontend** — React app (single-file), Tailwind theme, JD attach bar, NDJSON stream, table sort/filter/CSV |
