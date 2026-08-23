@@ -47,7 +47,10 @@ async def lifespan(_: FastAPI):
     # deploy karke "kaam kyun nahi kar raha" dhoondhne se behtar hai.
     missing = []
     if not crypto.ready():
-        missing.append("APP_SECRET_KEY — users API keys/cookies save NAHI kar payenge")
+        missing.append("APP_SECRET_KEY / DATABASE_URL — users API keys/cookies save NAHI kar payenge")
+    elif crypto.derived_only():
+        missing.append("APP_SECRET_KEY — abhi DATABASE_URL se derive ho rahi hai (chalta hai, "
+                       "par alag se set karna behtar hai)")
     if not mailer.configured():
         missing.append("SMTP_* — password reset link sirf is log me aayega, email nahi jaayegi")
     if not config.COOKIE_SECURE:
@@ -380,6 +383,7 @@ async def health() -> dict:
         # host par kaunsi variable reh gayi.
         "env": {
             "APP_SECRET_KEY": crypto.ready(),
+            "APP_SECRET_KEY_derived": crypto.derived_only(),
             "SMTP": mailer.configured(),
             "APP_BASE_URL": config.APP_BASE_URL,
             "COOKIE_SECURE": config.COOKIE_SECURE,
