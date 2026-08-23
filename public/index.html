@@ -2488,9 +2488,11 @@ function Searches({ history, loading, demo, onOpen, onClear, onDelete }) {
               </p>
             </div>
             <Button size="sm" onClick={() => onOpen(h)}>Open results</Button>
-            <Button size="sm" variant="danger" onClick={() => onDelete(h)} aria-label={`Delete ${h.title}`}>
-              <Trash2 size={13} aria-hidden />
-            </Button>
+            {!demo && (
+              <Button size="sm" variant="danger" onClick={() => onDelete(h)} aria-label={`Delete ${h.title}`}>
+                <Trash2 size={13} aria-hidden />
+              </Button>
+            )}
           </li>
         ))}
       </ul>
@@ -3495,7 +3497,9 @@ function App() {
     setMe(user);
     setHistoryLoading(true);
     refresh();
-    if (!user.hasApifyKey || !user.hasOpenRouterKey) {
+    if (user.isDemo) {
+      toast('info', 'Read-only demo', 'Browse a real saved run. Sign up with your own keys to run it live.');
+    } else if (!user.hasApifyKey || !user.hasOpenRouterKey) {
       toast('info', 'Add your API keys', 'Settings → Your API keys. Nothing runs until they are set.');
     }
   }, [refresh, toast]);
