@@ -13,20 +13,40 @@ import logging
 import smtplib
 import ssl
 from email.message import EmailMessage
-from email.utils import formataddr
+from email.utils import format_datetime, formataddr, make_msgid
+from datetime import datetime, timezone
+
+import httpx
 
 from . import config
 
 log = logging.getLogger("hiring-agent.mailer")
 
 
+def provider() -> str | None:
+    """Kaunse raaste se mail jaayegi. Pehla jo set ho wahi jeetta hai.
+
+    HTTP wale pehle hain kyunki Render ke free plan par SMTP ports block hote
+    hain — wahan Gmail SMTP chup-chaap timeout ho jaata hai.
+    """
+    if not config.SMTP_FROM:
+        return None
+    if config.BREVO_API_KEY:
+        return "brevo"
+    if config.RESEND_API_KEY:
+        return "resend"
+    if config.SMTP_HOST:
+        return "smtp"
+    return None
+
+
 def configured() -> bool:
-    return bool(config.SMTP_HOST and config.SMTP_FROM)
+    return provider() is not None
 
 
 def status() -> dict:
     """UI ko sirf itna pata chalta hai ki email nikal sakti hai ya nahi."""
-    return {"configured": configured(), "host": config.SMTP_HOST or None}
+    return {"configured": configured(), "provider": provider()}
 
 
 def _send_sync(msg: EmailMessage) -> None:
@@ -46,21 +66,85 @@ def _send_sync(msg: EmailMessage) -> None:
         server.send_message(msg)
 
 
+# ─────────────────────────── HTTP providers ───────────────────────────
+# Ye 443 par jaate hain, isliye SMTP block hone se farak nahi padta.
+
+
+async def _send_brevo(to: str, subject: str, text: str, html: str | None) -> None:
+    payload = {
+        "sender": {"email": config.SMTP_FROM, "name": config.SMTP_FROM_NAME},
+        "to": [{"email": to}],
+        "subject": subject,
+        "textContent": text,
+    }
+    if html:
+        payload["htmlContent"] = html
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        res = await client.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": config.BREVO_API_KEY, "accept": "application/json"},
+            json=payload,
+        )
+    if res.status_code >= 300:
+        raise RuntimeError(f"Brevo rejected the email ({res.status_code}): {res.text[:300]}")
+
+
+async def _send_resend(to: str, subject: str, text: str, html: str | None) -> None:
+    payload = {
+        "from": f"{config.SMTP_FROM_NAME} <{config.SMTP_FROM}>",
+        "to": [to],
+        "subject": subject,
+        "text": text,
+    }
+    if html:
+        payload["html"] = html
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        res = await client.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {config.RESEND_API_KEY}"},
+            json=payload,
+        )
+    if res.status_code >= 300:
+        raise RuntimeError(f"Resend rejected the email ({res.status_code}): {res.text[:300]}")
+
+
 async def send(to: str, subject: str, text: str, html: str | None = None) -> None:
     """Bhej do. Fail hone par exception uthta hai — caller decide kare kya karna hai."""
-    if not configured():
-        raise RuntimeError("SMTP is not configured (set SMTP_HOST and SMTP_FROM in .env)")
+    how = provider()
+    if not how:
+        raise RuntimeError(
+            "No email provider configured — set SMTP_FROM plus one of "
+            "BREVO_API_KEY / RESEND_API_KEY / SMTP_HOST"
+        )
 
-    msg = EmailMessage()
-    msg["From"] = formataddr((config.SMTP_FROM_NAME, config.SMTP_FROM))
-    msg["To"] = to
-    msg["Subject"] = subject
-    msg.set_content(text)
-    if html:
-        msg.add_alternative(html, subtype="html")
+    if how == "brevo":
+        await _send_brevo(to, subject, text, html)
+    elif how == "resend":
+        await _send_resend(to, subject, text, html)
+    else:
+        msg = EmailMessage()
+        msg["From"] = formataddr((config.SMTP_FROM_NAME, config.SMTP_FROM))
+        msg["To"] = to
+        msg["Subject"] = subject
+        # Ye teen headers spam filters dekhte hain. Message-ID aur Date ke
+        # bina mail "kisi script ne bheja hai" jaisi lagti hai; Reply-To se
+        # banda jawab de sake. Auto-Submitted batata hai ki ye transactional
+        # hai, isliye koi auto-responder isse loop me nahi daalta.
+        msg["Message-ID"] = make_msgid(domain=config.SMTP_FROM.split("@")[-1])
+        msg["Date"] = format_datetime(datetime.now(timezone.utc))
+        msg["Reply-To"] = config.SMTP_FROM
+        msg["Auto-Submitted"] = "auto-generated"
+        # Plain text pehle, HTML uske baad — yahi sahi multipart/alternative
+        # order hai. Sirf HTML bhejna spam score badha deta hai.
+        msg.set_content(text)
+        if html:
+            msg.add_alternative(html, subtype="html")
 
-    await asyncio.to_thread(_send_sync, msg)
-    log.info("email sent to %s (%s)", to, subject)
+        await asyncio.to_thread(_send_sync, msg)
+
+    log.info("email sent to %s via %s (%s)", to, how, subject)
 
 
 # ─────────────────────────── password reset ───────────────────────────
@@ -103,7 +187,7 @@ async def send_password_reset(to: str, name: str, link: str) -> bool:
     text, html = _reset_bodies(name or "there", link, minutes)
 
     if not configured():
-        log.warning("SMTP not configured — password reset link for %s: %s", to, link)
+        log.warning("no email provider configured — password reset link for %s: %s", to, link)
         return False
 
     try:

@@ -52,7 +52,8 @@ async def lifespan(_: FastAPI):
         missing.append("APP_SECRET_KEY — abhi DATABASE_URL se derive ho rahi hai (chalta hai, "
                        "par alag se set karna behtar hai)")
     if not mailer.configured():
-        missing.append("SMTP_* — password reset link sirf is log me aayega, email nahi jaayegi")
+        missing.append("BREVO_API_KEY / RESEND_API_KEY / SMTP_* — reset link sirf is log me "
+                       "aayega, email nahi jaayegi")
     if not config.COOKIE_SECURE:
         missing.append("COOKIE_SECURE=1 — https deploy par set karo")
     if missing:
@@ -384,7 +385,7 @@ async def health() -> dict:
         "env": {
             "APP_SECRET_KEY": crypto.ready(),
             "APP_SECRET_KEY_derived": crypto.derived_only(),
-            "SMTP": mailer.configured(),
+            "EMAIL": mailer.provider() or False,
             "APP_BASE_URL": config.APP_BASE_URL,
             "COOKIE_SECURE": config.COOKIE_SECURE,
             "DEMO": config.DEMO_ENABLED,
