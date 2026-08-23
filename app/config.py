@@ -65,6 +65,20 @@ SMTP_SSL = os.getenv("SMTP_SSL", "").strip().lower() in ("1", "true", "yes") or 
 DEMO_EMAIL = os.getenv("DEMO_EMAIL", "demo@rayn.ai").strip().lower()
 DEMO_ENABLED = os.getenv("DEMO_ENABLED", "1").strip().lower() not in ("0", "false", "no")
 
+# Email bhejne ke teen raaste. Jo pehle mile wahi use hota hai.
+#
+# Render ke free plan par outbound SMTP ports (25/465/587) block hote hain, to
+# Gmail SMTP wahan chalta hi nahi. Isliye HTTP wale providers bhi rakhe hain —
+# wo 443 par jaate hain, jo kabhi block nahi hota.
+#
+#   BREVO_API_KEY   — 300 mail/day free, kisi bhi address par bhej sakte ho
+#                     (sirf sender email verify karna padta hai, domain nahi)
+#   RESEND_API_KEY  — free plan par domain verify kiye bina sirf apne hi
+#                     account wale email par bhej sakte ho
+#   SMTP_*          — Gmail app password. Local par theek, Render free par nahi.
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+
 # Reset link kitni der chalega. Chhota rakha hai — mail me pada link jitni
 # der zinda rahega, utni der khatra rahega.
 RESET_TOKEN_MINUTES = int(os.getenv("RESET_TOKEN_MINUTES", "30"))

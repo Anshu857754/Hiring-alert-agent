@@ -187,29 +187,68 @@ us user ke **saare sessions** delete ho jaate hain. Ek email par har 60 second
 me ek hi mail jaati hai — warna koi kisi ke inbox par button daba ke 500 mails
 girwa deta. Purane/expired rows startup par saaf ho jaate hain.
 
-**SMTP setup (Gmail)**
+**Email kaise bheje — teen raaste**
 
-1. Google account par 2FA on karo
-2. [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) se 16-character app password banao — tumhara **normal Gmail password kaam nahi karega**
-3. `.env` me daalo:
+App jo pehla provider set mile wahi use karti hai, isi order me:
+
+| Provider | Kab chunno | Limit |
+|---|---|---|
+| `BREVO_API_KEY` | **Render par yahi lo** | 300 mail/day free, kisi bhi address par |
+| `RESEND_API_KEY` | Sirf apne hi email par bhejna ho | domain verify kiye bina sirf apne account wale address par |
+| `SMTP_HOST` + `SMTP_USER` + `SMTP_PASS` | Local dev | Gmail app password |
+
+**Render par SMTP kyun nahi:** free plan par outbound SMTP ports (25/465/587)
+block hote hain. Gmail SMTP wahan chup-chaap timeout ho jaata hai aur user ko
+sirf generic "link bhej diya" dikhta rehta hai. HTTP wale providers 443 par
+jaate hain, jo kabhi block nahi hota — isliye deploy par wahi lo.
+
+Dono soorat me `SMTP_FROM` chahiye (From header) — bina uske koi provider
+select hi nahi hota.
+
+**Brevo (recommended)**
+
+1. [brevo.com](https://www.brevo.com) par free signup
+2. **Senders & IP** me apna email add karke verify karo (inbox me confirmation
+   aayegi) — domain ki zaroorat nahi
+3. **SMTP & API → API Keys** se ek key banao
+4. Env me daalo:
 
 ```
-APP_BASE_URL=https://tumhara-app.onrender.com   # deploy par asli URL, warna email me localhost jaayega
+APP_BASE_URL=https://tumhara-app.onrender.com
+BREVO_API_KEY=xkeysib-...
+SMTP_FROM=wahi-verified-email@gmail.com
+SMTP_FROM_NAME=RAYN.AI
+```
+
+**Gmail SMTP (local dev)**
+
+2FA on karo, phir [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+se 16-character app password banao — normal Gmail password kaam nahi karega.
+
+```
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=tumhara@gmail.com
 SMTP_PASS=abcd efgh ijkl mnop
 SMTP_FROM=tumhara@gmail.com
-SMTP_FROM_NAME=RAYN.AI
 ```
 
 Port 465 use karna ho to `SMTP_SSL=1` — 587 par STARTTLS apne aap lagta hai.
 
-**SMTP set na ho to?** App phir bhi chalti hai. Reset link server ke log me
-print hota hai (`WARNING … password reset link for x@y.com: …`) aur user ko
-wahi generic message dikhta hai. UI bhi bata deta hai ki mail nahi nikli.
-Matlab admin manually link bhej sakta hai, par email ke bina ye feature
-end-users ke liye adhoora hai — deploy se pehle SMTP zaroor bhar do.
+**Spam me na jaaye iske liye**
+
+SMTP path par har mail ke saath `Message-ID`, `Date`, `Reply-To` aur
+`Auto-Submitted: auto-generated` jaate hain — inke bina Gmail mail ko
+"script ne bheja hai" maan kar spam me daal deta hai. Body bhi hamesha
+plain text **aur** HTML dono me jaati hai (sirf HTML bhejna spam score
+badha deta hai). Sender verified hona chahiye, warna kuch bhi karo mail
+spam me hi girega.
+
+**Kuch bhi set na ho to?** App phir bhi chalti hai. Reset link server ke log
+me print hota hai (`no email provider configured — password reset link for
+x@y.com: ...`) aur user ko wahi generic message dikhta hai. UI bhi bata deta
+hai ki mail nahi nikli. Matlab admin manually link bhej sakta hai, par
+end-users ke liye ye feature tabhi poora hai jab koi provider set ho.
 
 ---
 
