@@ -347,7 +347,8 @@ import { AnimatePresence, motion } from 'https://esm.sh/framer-motion@11.15.0?de
 import {
   AlertTriangle, ArrowRight, BarChart3, Bell, Bookmark, BookmarkCheck, Briefcase, Building2, Check,
   CheckCircle2, ChevronDown, Clock, Command, Copy, Database, Download, ExternalLink, FileText, Github,
-  Globe, GraduationCap, History, Info, KeyRound, Layers, Link2, Loader2, MapPin, Menu, Minus, Moon,
+  Eye, EyeOff, Globe, GraduationCap, History, Info, KeyRound, Layers, Link2, Loader2, MapPin, Menu,
+  Minus, Moon,
   PanelLeftClose, PanelLeftOpen, Paperclip, Plus, RefreshCw, Rocket, Search, Send, Settings,
   ShieldCheck, SlidersHorizontal, Sparkles, Sun, Target, Trash2, TrendingUp, Upload, UserPlus, UserRound,
   Users, X, XCircle, Zap,
@@ -453,6 +454,9 @@ const api = {
     if (!res.ok) {
       const err = new Error(data.error || data.detail || `Request failed (${res.status})`);
       err.status = res.status;
+      // Backend kabhi-kabhi ek code bhi bhejta hai (jaise 'email_taken') taaki
+      // UI message ka text match kiye bina alag reaction de sake.
+      err.code = data.code || null;
       // Session expire / logout — App isko sunta hai aur login screen dikha deta hai.
       if (res.status === 401 && !path.startsWith('/api/auth/')) {
         window.dispatchEvent(new CustomEvent('ha:signed-out'));
@@ -1313,6 +1317,26 @@ function FieldLabel({ children, htmlFor, aside }) {
     <div className="mb-2 flex items-center justify-between gap-3">
       <label htmlFor={htmlFor} className="text-h3 font-semibold text-fg">{children}</label>
       {aside}
+    </div>
+  );
+}
+
+/* Masked input + "dikhao/chhupao" wala eye. Password, API key aur cookie —
+   teeno jagah yahi lagta hai, taaki paste karne ke baad banda check kar sake
+   ki sahi cheez gayi hai. Baaki saare props seedha <input> par jaate hain. */
+function SecretInput({ className = '', ...props }) {
+  const [shown, setShown] = useState(false);
+  const label = shown ? 'Hide' : 'Show';
+  return (
+    <div className="relative">
+      {/* pr-10 taaki text eye ke neeche na chala jaaye */}
+      <input {...props} type={shown ? 'text' : 'password'} className={`${className} pr-10`} />
+      <button type="button" onClick={() => setShown(!shown)} aria-label={label} aria-pressed={shown}
+              title={label} tabIndex={-1}
+              className={`absolute right-0 top-0 grid h-full w-10 place-items-center rounded-r-md
+                          text-fg-muted transition-colors hover:text-fg ${ring}`}>
+        {shown ? <EyeOff size={15} aria-hidden /> : <Eye size={15} aria-hidden />}
+      </button>
     </div>
   );
 }
@@ -2470,32 +2494,105 @@ function Searches({ history, loading, onOpen, onClear, onDelete }) {
    apni API keys deta hai; ek user ka data dusre ko kabhi nahi dikhta. */
 
 function AuthScreen({ onDone, dbOffline }) {
+  /* Chaar screens ek hi component me: login, signup, forgot (email maango) aur
+     reset (naya password). Reset wali khud se nahi khulti — sirf email ke link
+     se, /?reset=<token> par. */
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState('');
+  const [notice, setNotice] = useState('');
+
+  /* Email wale link se aaya token. `linkFor` batata hai kis account ka hai —
+     user ko dikhta hai ki wo sahi jagah aaya hai. */
+  const [token, setToken] = useState('');
+  const [linkFor, setLinkFor] = useState('');
+  const [checking, setChecking] = useState(false);
 
   const signup = mode === 'signup';
+  const forgot = mode === 'forgot';
+  const resetting = mode === 'reset';
+
+  const clearMsgs = () => { setError(''); setErrorCode(''); setNotice(''); };
+  const go = (next) => { clearMsgs(); setPassword(''); setConfirm(''); setMode(next); };
+
+  /* Link kholte hi token URL se utha kar address bar saaf kar dete hain. Wahan
+     pada rehta to browser history, screen-share aur "copy link" — teeno me chala
+     jaata. Server par verify bhi abhi kar lete hain, taaki user poora password
+     type karne ke baad "link expired" na padhe. */
+  useEffect(() => {
+    const fromLink = new URLSearchParams(window.location.search).get('reset');
+    if (!fromLink) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    setToken(fromLink);
+    setMode('reset');
+    setChecking(true);
+    api.get(`/api/auth/reset?token=${encodeURIComponent(fromLink)}`)
+       .then((out) => { setLinkFor(out.email); setEmail(out.email); })
+       .catch((err) => { setError(err.message); setToken(''); })
+       .finally(() => setChecking(false));
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
-    setError('');
+    clearMsgs();
     setBusy(true);
     try {
-      const path = signup ? '/api/auth/signup' : '/api/auth/login';
-      const body = signup ? { email, password, name } : { email, password };
-      const out = await api.post(path, body);
-      onDone(out.user);
+      if (forgot) {
+        const out = await api.post('/api/auth/forgot', { email });
+        // Jawab jaan-boojh kar generic hai — server kabhi nahi batata ki ye
+        // email registered hai ya nahi.
+        setNotice(out.message);
+        if (out.emailConfigured === false) {
+          setNotice(`${out.message} Note: the server has no SMTP configured, so the link was only written to the server log.`);
+        }
+      } else if (resetting) {
+        if (password !== confirm) throw new Error('Both passwords must match');
+        const out = await api.post('/api/auth/reset', { token, password });
+        // Seedha andar nahi ghusate — naya password ek baar type karna hi
+        // confirm karta hai ki wo yaad hai.
+        setPassword(''); setConfirm(''); setToken(''); setLinkFor('');
+        setMode('login');
+        setEmail(out.email);
+        setNotice(out.message);
+      } else {
+        const path = signup ? '/api/auth/signup' : '/api/auth/login';
+        const body = signup ? { email, password, name } : { email, password };
+        const out = await api.post(path, body);
+        onDone(out.user);
+      }
     } catch (err) {
       setError(err.message);
+      setErrorCode(err.code || '');
     } finally {
       setBusy(false);
     }
   };
 
   const field = `h-10 w-full rounded-md border border-line bg-input px-3 text-sm text-fg shadow-sm ${ring}`;
+  const linkBtn = `font-semibold text-brand-text hover:underline ${ring}`;
+
+  const heading = { login: 'Welcome back', signup: 'Create your account',
+                    forgot: 'Forgot your password?', reset: 'Choose a new password' }[mode];
+  const blurb = {
+    login: 'Sign in to get back to your pipeline.',
+    signup: 'Your searches, drafts and contacts stay private to your account.',
+    forgot: "Enter your email and we'll send you a link to set a new one.",
+    reset: linkFor ? `Setting a new password for ${linkFor}.` : 'Checking your link…',
+  }[mode];
+
+  const cta = { login: 'Sign in', signup: 'Create account',
+                forgot: 'Send reset link', reset: 'Save new password' }[mode];
+  const ctaBusy = { login: 'Signing in…', signup: 'Creating account…',
+                    forgot: 'Sending…', reset: 'Saving…' }[mode];
+  const CtaIcon = { login: ArrowRight, signup: ArrowRight, forgot: Send, reset: KeyRound }[mode];
+
+  // Link hi kharab nikla — form dikhane ka koi matlab nahi.
+  const deadLink = resetting && !token && !checking;
 
   return (
     <div className="themed flex min-h-screen items-center justify-center bg-app px-4 py-10">
@@ -2509,14 +2606,8 @@ function AuthScreen({ onDone, dbOffline }) {
         </div>
 
         <Card className="p-6">
-          <h1 className="text-h1 font-semibold text-fg">
-            {signup ? 'Create your account' : 'Welcome back'}
-          </h1>
-          <p className="mt-1 text-sm text-fg-sec">
-            {signup
-              ? 'Your searches, drafts and contacts stay private to your account.'
-              : 'Sign in to get back to your pipeline.'}
-          </p>
+          <h1 className="text-h1 font-semibold text-fg">{heading}</h1>
+          <p className="mt-1 text-sm text-fg-sec">{blurb}</p>
 
           {dbOffline && (
             <InlineStatus type="error">
@@ -2524,51 +2615,109 @@ function AuthScreen({ onDone, dbOffline }) {
             </InlineStatus>
           )}
 
-          <form onSubmit={submit} className="mt-5 space-y-4">
-            {signup && (
-              <div>
-                <FieldLabel htmlFor="auth-name" aside={<span className="text-xs text-fg-muted">Optional</span>}>
-                  Name
-                </FieldLabel>
-                <input id="auth-name" value={name} onChange={(e) => setName(e.target.value)}
-                       autoComplete="name" placeholder="Anshu Kumar" className={field} />
-              </div>
-            )}
+          {deadLink ? (
+            <>
+              <InlineStatus type="error">{error || 'This reset link is invalid or has expired.'}</InlineStatus>
+              <Button variant="primary" size="lg" className="mt-4 w-full" onClick={() => go('forgot')}>
+                Request a new link <ArrowRight size={14} aria-hidden />
+              </Button>
+            </>
+          ) : checking ? (
+            <p className="mt-5 flex items-center gap-2 text-sm text-fg-muted">
+              <Loader2 size={14} aria-hidden className="animate-spin" /> Checking your reset link…
+            </p>
+          ) : (
+            <form onSubmit={submit} className="mt-5 space-y-4">
+              {signup && (
+                <div>
+                  <FieldLabel htmlFor="auth-name" aside={<span className="text-xs text-fg-muted">Optional</span>}>
+                    Name
+                  </FieldLabel>
+                  <input id="auth-name" value={name} onChange={(e) => setName(e.target.value)}
+                         autoComplete="name" placeholder="Anshu Kumar" className={field} />
+                </div>
+              )}
 
-            <div>
-              <FieldLabel htmlFor="auth-email">Email</FieldLabel>
-              <input id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                     autoComplete="email" required placeholder="you@example.com" className={field} />
-            </div>
+              {!resetting && (
+                <div>
+                  <FieldLabel htmlFor="auth-email">Email</FieldLabel>
+                  <input id="auth-email" type="email" value={email}
+                         onChange={(e) => { setEmail(e.target.value); if (errorCode === 'email_taken') clearMsgs(); }}
+                         autoComplete="email" required placeholder="you@example.com" className={field} />
+                </div>
+              )}
 
-            <div>
-              <FieldLabel htmlFor="auth-password"
-                          aside={signup ? <span className="text-xs text-fg-muted">At least 8 characters</span> : null}>
-                Password
-              </FieldLabel>
-              <input id="auth-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                     autoComplete={signup ? 'new-password' : 'current-password'} required
-                     placeholder="••••••••" className={field} />
-            </div>
+              {!forgot && (
+                <div>
+                  <FieldLabel
+                    htmlFor="auth-password"
+                    aside={
+                      mode === 'login'
+                        ? <button type="button" onClick={() => go('forgot')}
+                                  className={`text-xs ${linkBtn}`}>Forgot password?</button>
+                        : <span className="text-xs text-fg-muted">At least 8 characters</span>
+                    }>
+                    {resetting ? 'New password' : 'Password'}
+                  </FieldLabel>
+                  <SecretInput id="auth-password" value={password}
+                               onChange={(e) => setPassword(e.target.value)}
+                               autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required
+                               placeholder="••••••••" className={field} />
+                </div>
+              )}
 
-            {error && <InlineStatus type="error">{error}</InlineStatus>}
+              {resetting && (
+                <div>
+                  <FieldLabel htmlFor="auth-confirm">Confirm new password</FieldLabel>
+                  <SecretInput id="auth-confirm" value={confirm}
+                               onChange={(e) => setConfirm(e.target.value)}
+                               autoComplete="new-password" required placeholder="••••••••" className={field} />
+                </div>
+              )}
 
-            <Button type="submit" variant="primary" size="lg" className="w-full"
-                    disabled={busy || dbOffline}>
-              {busy
-                ? <><Loader2 size={14} aria-hidden className="animate-spin" /> {signup ? 'Creating account…' : 'Signing in…'}</>
-                : <>{signup ? 'Create account' : 'Sign in'} <ArrowRight size={14} aria-hidden /></>}
-            </Button>
-          </form>
+              {/* Email pehle se registered hai — ye sabse aam galti hai, isliye
+                  seedha wahi do raaste bhi de dete hain jo yahan se chahiye. */}
+              {errorCode === 'email_taken' ? (
+                <div className="fade-up mt-2 rounded-md border border-warning-border bg-warning-subtle px-3 py-2.5">
+                  <p className="flex items-start gap-2 text-sm text-warning-text">
+                    <AlertTriangle size={14} aria-hidden className="mt-px shrink-0" />
+                    <span>
+                      <span className="font-semibold">{email}</span> already has an account.
+                      Sign in with it, or reset the password if you don't remember it.
+                    </span>
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-4 pl-6">
+                    <button type="button" onClick={() => go('login')} className={`text-sm ${linkBtn}`}>
+                      Sign in instead
+                    </button>
+                    <button type="button" onClick={() => go('forgot')} className={`text-sm ${linkBtn}`}>
+                      Reset password
+                    </button>
+                  </div>
+                </div>
+              ) : error ? (
+                <InlineStatus type="error">{error}</InlineStatus>
+              ) : null}
 
-          <p className="mt-5 text-center text-sm text-fg-muted">
-            {signup ? 'Already have an account?' : "Don't have an account?"}{' '}
-            <button type="button"
-                    onClick={() => { setMode(signup ? 'login' : 'signup'); setError(''); }}
-                    className={`font-semibold text-brand-text hover:underline ${ring}`}>
-              {signup ? 'Sign in' : 'Create one'}
-            </button>
-          </p>
+              {notice && <InlineStatus type="success">{notice}</InlineStatus>}
+
+              <Button type="submit" variant="primary" size="lg" className="w-full"
+                      disabled={busy || dbOffline}>
+                {busy
+                  ? <><Loader2 size={14} aria-hidden className="animate-spin" /> {ctaBusy}</>
+                  : <>{cta} <CtaIcon size={14} aria-hidden /></>}
+              </Button>
+            </form>
+          )}
+
+          {!deadLink && !checking && (
+            <p className="mt-5 text-center text-sm text-fg-muted">
+              {mode === 'login' && <>Don't have an account? <button type="button" onClick={() => go('signup')} className={linkBtn}>Create one</button></>}
+              {mode === 'signup' && <>Already have an account? <button type="button" onClick={() => go('login')} className={linkBtn}>Sign in</button></>}
+              {mode === 'forgot' && <>Remembered it? <button type="button" onClick={() => go('login')} className={linkBtn}>Back to sign in</button></>}
+              {mode === 'reset' && <>The link works once and expires shortly.</>}
+            </p>
+          )}
         </Card>
 
         <p className="mt-4 text-center text-xs text-fg-muted">
@@ -2651,9 +2800,9 @@ function ApiKeysCard({ user, secretReady, busy, onSave }) {
                         aside={user?.hasApifyKey ? <span className="text-xs text-fg-muted">Saved — leave blank to keep it</span> : null}>
               Apify API key
             </FieldLabel>
-            <input id="key-apify" type="password" value={apify} onChange={(e) => setApify(e.target.value)}
-                   autoComplete="off" spellCheck={false}
-                   placeholder={user?.hasApifyKey ? '•••••••• (saved)' : 'apify_api_…'} className={field} />
+            <SecretInput id="key-apify" value={apify} onChange={(e) => setApify(e.target.value)}
+                         autoComplete="off" spellCheck={false}
+                         placeholder={user?.hasApifyKey ? '•••••••• (saved)' : 'apify_api_…'} className={field} />
             <p className="mt-1.5 text-xs text-fg-muted">
               From console.apify.com → Settings → Integrations. Encrypted before storage, never sent back to this page.
             </p>
@@ -2664,9 +2813,9 @@ function ApiKeysCard({ user, secretReady, busy, onSave }) {
                         aside={user?.hasOpenRouterKey ? <span className="text-xs text-fg-muted">Saved — leave blank to keep it</span> : null}>
               OpenRouter API key
             </FieldLabel>
-            <input id="key-openrouter" type="password" value={openRouter} onChange={(e) => setOpenRouter(e.target.value)}
-                   autoComplete="off" spellCheck={false}
-                   placeholder={user?.hasOpenRouterKey ? '•••••••• (saved)' : 'sk-or-v1-…'} className={field} />
+            <SecretInput id="key-openrouter" value={openRouter} onChange={(e) => setOpenRouter(e.target.value)}
+                         autoComplete="off" spellCheck={false}
+                         placeholder={user?.hasOpenRouterKey ? '•••••••• (saved)' : 'sk-or-v1-…'} className={field} />
             <p className="mt-1.5 text-xs text-fg-muted">From openrouter.ai → Keys.</p>
           </div>
 
@@ -2954,10 +3103,10 @@ function SenderAccountCard({ senders, secretReady, busy, onSave, onVerify, onDel
                         aside={current?.hasCookie ? <span className="text-xs text-fg-muted">A cookie is already saved — leave blank to keep it</span> : null}>
               li_at cookie
             </FieldLabel>
-            <input id="sender-cookie" type="password" value={liAt} onChange={(e) => setLiAt(e.target.value)}
-                   autoComplete="off" spellCheck={false}
-                   placeholder={current?.hasCookie ? '•••••••• (saved)' : 'AQEDAT…'}
-                   className={`h-9 w-full rounded-md border border-line bg-input px-3 font-mono text-sm text-fg shadow-sm ${ring}`} />
+            <SecretInput id="sender-cookie" value={liAt} onChange={(e) => setLiAt(e.target.value)}
+                         autoComplete="off" spellCheck={false}
+                         placeholder={current?.hasCookie ? '•••••••• (saved)' : 'AQEDAT…'}
+                         className={`h-9 w-full rounded-md border border-line bg-input px-3 font-mono text-sm text-fg shadow-sm ${ring}`} />
             <p className="mt-1.5 text-xs text-fg-muted">
               Log in to LinkedIn in your browser, open DevTools → Application → Cookies → linkedin.com, and copy
               the value of <b className="font-semibold text-fg-sec">li_at</b>. It is encrypted before it is stored
@@ -2969,9 +3118,9 @@ function SenderAccountCard({ senders, secretReady, busy, onSave, onVerify, onDel
             <FieldLabel htmlFor="sender-jsession" aside={<span className="text-xs text-fg-muted">Optional</span>}>
               JSESSIONID
             </FieldLabel>
-            <input id="sender-jsession" type="password" value={jsession} onChange={(e) => setJsession(e.target.value)}
-                   autoComplete="off" spellCheck={false} placeholder="ajax:…"
-                   className={`h-9 w-full rounded-md border border-line bg-input px-3 font-mono text-sm text-fg shadow-sm ${ring}`} />
+            <SecretInput id="sender-jsession" value={jsession} onChange={(e) => setJsession(e.target.value)}
+                         autoComplete="off" spellCheck={false} placeholder="ajax:…"
+                         className={`h-9 w-full rounded-md border border-line bg-input px-3 font-mono text-sm text-fg shadow-sm ${ring}`} />
           </div>
 
           <SwitchRow id="sender-premium" title="This account has LinkedIn Premium"
@@ -3267,7 +3416,13 @@ function App() {
 
   /* ── auth actions ── */
 
+  /* URL me ?reset=<token> hai? Ye pehle render par ek hi baar dekhte hain —
+     AuthScreen mount hote hi address bar saaf kar deti hai. */
+  const [hasResetLink, setHasResetLink] = useState(
+    () => new URLSearchParams(window.location.search).has('reset'));
+
   const onAuthed = useCallback((user) => {
+    setHasResetLink(false);   // reset ho chuka, ab normal app dikhni chahiye
     setMe(user);
     setHistoryLoading(true);
     refresh();
@@ -3747,7 +3902,9 @@ function App() {
       </div>
     );
   }
-  if (me === null) return <AuthScreen onDone={onAuthed} dbOffline={!dbOk} />;
+  /* Reset link par aaye ho to AuthScreen hi dikhni chahiye, chahe purani
+     session cookie abhi zinda ho — warna link chup-chaap app me kho jaata. */
+  if (me === null || hasResetLink) return <AuthScreen onDone={onAuthed} dbOffline={!dbOk} />;
 
   const sidebarProps = { view, setView, savedCount: saved.length,
     contactCount: contacts.length || Object.keys(drafts).length, spend, me, onLogout: logout };

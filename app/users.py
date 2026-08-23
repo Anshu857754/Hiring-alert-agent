@@ -19,7 +19,9 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from . import crypto, db
+from psycopg.errors import UniqueViolation
+
+from . import config, crypto, db
 from .db import S
 
 log = logging.getLogger("hiring-agent.users")
@@ -39,7 +41,16 @@ MIN_PASSWORD = 8
 
 
 class AuthError(Exception):
-    """Message seedha user ko dikhta hai — isliye hamesha padhne layak rakho."""
+    """Message seedha user ko dikhta hai — isliye hamesha padhne layak rakho.
+
+    `code` optional hai. Frontend ko kuch case me sirf text se zyada chahiye
+    hota hai (jaise "email pehle se hai" par "Sign in instead" wala button
+    dikhana) — tab message ka string match karne se behtar hai ek code bhejna.
+    """
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 # ─────────────────────────── password ───────────────────────────
@@ -100,21 +111,26 @@ async def create_user(email: str, password: str, name: str | None = None) -> dic
 
     existing = await db.fetch_one(f"SELECT id FROM {S}users WHERE lower(email) = %s", (email,))
     if existing:
-        raise AuthError("An account with this email already exists — sign in instead")
+        raise AuthError(f"{email} is already registered", code="email_taken")
 
     password_hash, salt = hash_password(password)
 
     # Pehla banda hi orphan rows ka maalik banta hai (neeche adopt_orphans).
     first_user = await count_users() == 0
 
-    row = await db.fetch_one(
-        f"""
-        INSERT INTO {S}users (email, name, password_hash, password_salt)
-        VALUES (%s, %s, %s, %s)
-     RETURNING *
-        """,
-        (email, (name or "").strip() or None, password_hash, salt),
-    )
+    try:
+        row = await db.fetch_one(
+            f"""
+            INSERT INTO {S}users (email, name, password_hash, password_salt)
+            VALUES (%s, %s, %s, %s)
+         RETURNING *
+            """,
+            (email, (name or "").strip() or None, password_hash, salt),
+        )
+    except UniqueViolation:
+        # Do signups ek hi email par ek saath aa gaye. Upar wala SELECT dono me
+        # khaali laut sakta hai — asli faisla users_email_uniq index karta hai.
+        raise AuthError(f"{email} is already registered", code="email_taken") from None
     if not row:
         raise AuthError("Could not create the account — the database rejected it")
 
@@ -164,6 +180,93 @@ async def change_password(user_id: int, current: str, new: str) -> None:
     )
     # Password badla to baaki devices ke sessions gir jaane chahiye.
     await db.execute(f"DELETE FROM {S}sessions WHERE user_id = %s", (user_id,))
+
+
+# ─────────────────────────── password reset ───────────────────────────
+# Email me raw token jaata hai, DB me sirf uska sha256. DB leak ho jaaye to
+# bhi koi link nahi bana sakta. Yahan scrypt ki zaroorat nahi — token khud
+# 32 random bytes ka hai, guess karne layak kuch hai hi nahi.
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
+async def create_reset_token(email: str, ip: str | None = None) -> tuple[dict, str] | None:
+    """Naya reset token. Email registered na ho to None — caller phir bhi wahi
+    generic jawab deta hai, taaki koi is route se emails na sungh sake."""
+    email = (email or "").strip().lower()
+    row = await db.fetch_one(f"SELECT * FROM {S}users WHERE lower(email) = %s", (email,))
+    if not row:
+        return None
+
+    # Purane token bekaar — warna mail me pade 4 links ek saath zinda rehte.
+    await db.execute(f"DELETE FROM {S}password_resets WHERE user_id = %s", (row["id"],))
+
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(minutes=config.RESET_TOKEN_MINUTES)
+    await db.execute(
+        f"""
+        INSERT INTO {S}password_resets (token_hash, user_id, expires_at, requested_ip)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (_token_hash(token), row["id"], expires, (ip or "")[:60] or None),
+    )
+    log.info("password reset requested for %s", email)
+    return _user_out(row), token
+
+
+async def _live_reset(token: str) -> dict | None:
+    """Token ka row + user, tabhi jab wo abhi tak valid ho."""
+    if not token:
+        return None
+    return await db.fetch_one(
+        f"""
+        SELECT r.token_hash, r.user_id, u.email, u.name
+          FROM {S}password_resets r
+          JOIN {S}users u ON u.id = r.user_id
+         WHERE r.token_hash = %s AND r.used_at IS NULL AND r.expires_at > now()
+        """,
+        (_token_hash(token),),
+    )
+
+
+async def check_reset_token(token: str) -> dict:
+    """Form dikhane se pehle frontend yahi poochta hai — taaki user 8 character
+    ka password type karne ke baad "link expired" na dekhe."""
+    row = await _live_reset(token)
+    if not row:
+        raise AuthError("This reset link is invalid or has expired — request a new one")
+    return {"email": row["email"], "name": row["name"]}
+
+
+async def reset_password(token: str, new: str) -> dict:
+    """Token se password badlo. Token ek hi baar chalta hai."""
+    row = await _live_reset(token)
+    if not row:
+        raise AuthError("This reset link is invalid or has expired — request a new one")
+    if len(new or "") < MIN_PASSWORD:
+        raise AuthError(f"New password must be at least {MIN_PASSWORD} characters")
+
+    password_hash, salt = hash_password(new)
+    await db.execute(
+        f"UPDATE {S}users SET password_hash = %s, password_salt = %s WHERE id = %s",
+        (password_hash, salt, row["user_id"]),
+    )
+    # Token jala do, aur us user ke saare purane sessions bhi — reset ki wajah
+    # aksar "account kisi aur ke paas chala gaya" hoti hai.
+    await db.execute(
+        f"UPDATE {S}password_resets SET used_at = now() WHERE token_hash = %s", (row["token_hash"],)
+    )
+    await db.execute(f"DELETE FROM {S}sessions WHERE user_id = %s", (row["user_id"],))
+    log.info("password reset completed for %s", row["email"])
+    return {"email": row["email"]}
+
+
+async def purge_expired_resets() -> int:
+    return await db.execute(
+        f"DELETE FROM {S}password_resets WHERE expires_at <= now() OR used_at IS NOT NULL"
+    )
 
 
 # ─────────────────────────── API keys ───────────────────────────

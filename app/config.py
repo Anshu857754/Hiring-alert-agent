@@ -35,8 +35,31 @@ APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "").strip()
 # off; https deploy (Render) par 1 kar do warna cookie plain http par bhi jaayegi.
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes")
 
-# Render/Railway jaise hosts apna PORT env var dete hain.
-PORT = int(os.getenv("PORT", "3000"))
+# Render/Railway jaise hosts apna PORT env var dete hain. Default `run.py` ke
+# default se milna chahiye — warna APP_BASE_URL galat port ka link banata hai.
+PORT = int(os.getenv("PORT", "10000"))
+
+# ── forgot password / email ────────────────────────────────────────
+# Reset link isi base par banta hai. Deploy par apna asli URL daalo warna
+# email me localhost ka link jaayega jo user ke browser me khulega hi nahi.
+APP_BASE_URL = os.getenv("APP_BASE_URL", f"http://localhost:{PORT}").strip().rstrip("/")
+
+# SMTP. Gmail ke liye: host smtp.gmail.com, port 587, user tumhara gmail,
+# pass **app password** (normal password kaam nahi karega — 2FA on karke
+# myaccount.google.com/apppasswords se banao).
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "").strip()
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+# From header. Khaali ho to SMTP_USER hi bhej dete hain.
+SMTP_FROM = os.getenv("SMTP_FROM", "").strip() or SMTP_USER
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "RAYN.AI").strip()
+# 587 par STARTTLS, 465 par seedha SSL. Default port se hi decide ho jaata hai.
+SMTP_SSL = os.getenv("SMTP_SSL", "").strip().lower() in ("1", "true", "yes") or SMTP_PORT == 465
+
+# Reset link kitni der chalega. Chhota rakha hai — mail me pada link jitni
+# der zinda rahega, utni der khatra rahega.
+RESET_TOKEN_MINUTES = int(os.getenv("RESET_TOKEN_MINUTES", "30"))
 
 MIN_LIMIT = 10
 MAX_LIMIT = 30
