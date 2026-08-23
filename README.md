@@ -47,6 +47,21 @@ SMTP_USER=tumhara@gmail.com
 SMTP_PASS=                  # Gmail ka **app password**, normal password nahi
 ```
 
+`APP_SECRET_KEY` **optional hai** — set na ho to `DATABASE_URL` se ek key
+derive ho jaati hai aur app poori chalti hai. Ye jaan-boojh kar hai: pehle ek
+env var bhool jaane par "Save keys" hamesha ke liye disabled reh jaata tha,
+matlab deployed app khuli to hoti thi par usse kuch kar nahi sakte the.
+
+Suraksha kam nahi hoti — hum DB dump se bacha rahe hain, aur `DATABASE_URL`
+env me rehti hai, DB me nahi. Attacker ke paas dump ho to bhi key derive nahi
+kar sakta. Aur ek hi database use karne wale environments (local + Render)
+apne aap ek hi key par aa jaate hain, isliye "dono jagah same value daalna"
+wali galti ab possible hi nahi.
+
+Explicit key set karna phir bhi behtar hai — tab DB password aur encryption
+key alag-alag rotate kar sakte ho. Decrypt par dono keys try hoti hain
+(`MultiFernet`), to purani sealed values kabhi bekaar nahi hoti.
+
 `APP_SECRET_KEY` koi bhi lambi random string ho sakti hai:
 
 ```bash
@@ -141,7 +156,8 @@ warna tumhari history kisi aur ke paas chali jaayegi.
 **Deploy par**
 
 `COOKIE_SECURE=1` set karo — warna session cookie plain http par bhi jaayegi.
-`APP_SECRET_KEY` set na ho to koi user apni keys hi save nahi kar paayega.
+`APP_SECRET_KEY` set na ho to key `DATABASE_URL` se derive ho jaati hai — app chalti
+rahegi, par explicit key rakhna behtar hai.
 
 ---
 
@@ -254,7 +270,7 @@ live chalana chahe, uske liye `APP_SECRET_KEY` zaroori hai.
 | `app/outreach.py` | Founder-ya-HR ka rule + LinkedIn people-search link. Threshold `config.FOUNDER_MAX_EMPLOYEES` |
 | `app/people.py` | Company ke decision makers Apify se — bucket ke titles, aur `works_at()` company filter |
 | `app/connect.py` | Connection request bhejna. Provider interface (apify / unipile) + rate limiting + cookie verify |
-| `app/crypto.py` | Sender cookie ko Fernet se seal/unseal karta hai. Key: `APP_SECRET_KEY` |
+| `app/crypto.py` | Keys aur cookie ko Fernet se seal/unseal. Key `APP_SECRET_KEY` se, na ho to `DATABASE_URL` se derive |
 | `app/docs.py` | markitdown wrapper — PDF/DOCX se text nikaalta hai (local, koi LLM call nahi) |
 | `app/db.py` | Postgres connection pool + migration runner (`migrations/*.sql`) |
 | `app/store.py` | Saari DB queries — searches, jobs, saved_jobs, plans, outreach, contacts, senders, stats |
