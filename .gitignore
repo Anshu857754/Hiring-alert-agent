@@ -8,3 +8,7 @@ jobs-*.csv
 
 # Ek account ka nikaala hua data — personal hai, repo me nahi jaana chahiye.
 export/
+
+# Apna resume — naam, phone, email sab isme hai. Repo public hai, ye andar
+# nahi jaana chahiye.
+Resume/
